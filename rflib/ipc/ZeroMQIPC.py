@@ -16,7 +16,7 @@ INTERNAL_SEND_CHANNEL = "inproc://sender"
 INTERNAL_PUBLISH_CHANNEL = "inproc://channeler"
 
 _logger = logging.getLogger(__name__)
-_logger.setLevel(logging.DEBUG)
+_logger.setLevel(logging.WARNING)
 
 class ZeroMQIPCMessageService(IPC.IPCMessageService):
     def __init__(self, address, id_, threading_, bind):
@@ -43,7 +43,7 @@ class ZeroMQIPCMessageService(IPC.IPCMessageService):
             worker.join()
 
     def send(self, channel_id, to, msg):
-        _logger.debug('send on ch %s to %s:\n%s', channel_id, to, str(msg))
+        #_logger.debug('send on ch %s to %s:\n%s', channel_id, to, str(msg))
         self._sender.send(to, zmq.SNDMORE)
         self._sender.send(channel_id, zmq.SNDMORE)
         self._sender.send(struct.pack('B', msg.get_type()), zmq.SNDMORE)
@@ -145,7 +145,7 @@ class ZeroMQIPCMessageService(IPC.IPCMessageService):
         subscriber = self._ctx.socket(zmq.SUB)
         subscriber.subscribe = channel_id
         subscriber.connect(INTERNAL_PUBLISH_CHANNEL)
-        _logger.debug('subscribing to ch %s', channel_id)
+        #_logger.debug('subscribing to ch %s', channel_id)
 
         while True:
             parts = subscriber.recv_multipart()
@@ -155,7 +155,7 @@ class ZeroMQIPCMessageService(IPC.IPCMessageService):
             (channel, addr, type_, payload) = parts
             msg = factory.build_for_type(struct.unpack('B', type_)[0])
             msg.from_bson(payload)
-            _logger.debug('receive on ch %s from %s:\n%s', channel, addr, str(msg))
+            #_logger.debug('receive on ch %s from %s:\n%s', channel, addr, str(msg))
             processor.process(addr, self._id, channel, msg)
 
 
