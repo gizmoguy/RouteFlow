@@ -193,6 +193,9 @@ class RFServer(RFProtocolFactory, IPC.IPCMessageProcessor):
                 action = REGISTER_ISL
             else:
                 # Register idle DP awaiting for configuration
+                self.log.warning(
+                        "DP Port with no config! dp_id = %s,  dp_port = %s"\
+                        % (format_id(dp_id), dp_port))
                 action = REGISTER_IDLE
         else:
             entry = self.rftable.get_entry_by_vm_port(config_entry.vm_id,
