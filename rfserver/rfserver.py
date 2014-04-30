@@ -283,7 +283,7 @@ class RFServer(RFProtocolFactory, IPC.IPCMessageProcessor):
             rm.set_mod(RMT_DELETE)
             rm.add_option(Option.PRIORITY(PRIORITY_LOWEST))
         elif operation_id == DC_DROP_ALL:
-            rm.add_option(Option.PRIORITY(PRIORITY_LOWEST + PRIORITY_BAND))
+            rm.add_option(Option.PRIORITY(PRIORITY_LOWEST))
             # No action specifies discard
             pass
         else:
