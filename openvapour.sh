@@ -1,6 +1,6 @@
 #!/bin/bash
 
-HOSTVMIP=172.30.20.253
+HOSTVMIP=172.30.20.253/28
 DPPORTS=10
 WAND_DPID=0x99
 REANNZ_DPID=0x9a
@@ -112,8 +112,8 @@ trap "reset 0; exit 0" INT
 if [ "$ACTION" != "RESET" ]; then
     echo_bold "-> Starting the management network ($RFBR)..."
     $VSCTL add-br $RFBR
-    ifconfig $RFBR up
-    ifconfig $RFBR $HOSTVMIP
+    ip link set $RFBR up
+    ip address add $HOSTVMIP dev $RFBR
     $VSCTL add-port $RFBR rfvm1.0
     start_rfvm1
     echo_bold "-> Configuring the virtual machines..."
@@ -139,7 +139,7 @@ if [ "$ACTION" != "RESET" ]; then
     $VSCTL set bridge $RFDP other-config:datapath-id=$RF_DPID
     $VSCTL set bridge $RFDP protocols=OpenFlow12
     $VSCTL set-controller $RFDP tcp:127.0.0.1:$CONTROLLER_PORT
-    ifconfig $RFDP up
+    ip link set $RFDP up
 
     echo_bold "You can stop this test by pressing Ctrl+C."
     wait
