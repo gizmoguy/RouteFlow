@@ -50,7 +50,7 @@ usage() {
     echo "  -o    Specify the Open vSwitch version to fetch" \
          "(default: $OVS_VERSION)"
     echo;
-    echo "Valid controllers: pox (default), nox, ryu. Multiple may be" \
+    echo "Valid controllers: nox, ryu. Multiple may be" \
          "specified at once."
     echo "Controllers must be specified at the end of the command."
     echo;
