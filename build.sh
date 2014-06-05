@@ -151,7 +151,11 @@ build_routeflow() {
 
             grep -q cgroup /etc/fstab
             if [ $? -eq 1 ]; then
-                $SUPER echo "none /cgroup cgroup defaults 0 0" >> /etc/fstab
+                if [ -z "$DO" ]; then
+                    $SUPER echo "none /cgroup cgroup defaults 0 0" >> /etc/fstab
+                else
+                    $SUPER echo "none /cgroup cgroup defaults 0 0 >> /etc/fstab"
+                fi
                 if [ $? -ne 0 ]; then
                     print_status "Can't add cgroup to /etc/fstab" $YELLOW
                 fi
