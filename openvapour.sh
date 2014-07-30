@@ -137,7 +137,7 @@ if [ "$ACTION" != "RESET" ]; then
       $VSCTL add-port $RFDP rfvm1.$i
     done
     $VSCTL set bridge $RFDP other-config:datapath-id=$RF_DPID
-    $VSCTL set bridge $RFDP protocols=OpenFlow12
+    $VSCTL set bridge $RFDP protocols=OpenFlow13
     $VSCTL set-controller $RFDP tcp:127.0.0.1:$CONTROLLER_PORT
     ip link set $RFDP up
 
