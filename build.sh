@@ -152,7 +152,7 @@ build_routeflow() {
             grep -q cgroup /etc/fstab
             if [ $? -eq 1 ]; then
                 if [ -z "$DO" ]; then
-                    $SUPER echo "none /cgroup cgroup defaults 0 0" >> /etc/fstab
+                    echo "none /cgroup cgroup defaults 0 0" | $SUPER tee -a /etc/fstab > /dev/null
                 else
                     $SUPER echo "none /cgroup cgroup defaults 0 0 >> /etc/fstab"
                 fi
