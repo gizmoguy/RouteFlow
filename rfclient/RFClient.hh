@@ -30,12 +30,12 @@ class RFClient : private RFProtocolFactory, private IPCMessageProcessor,
         uint8_t hwaddress[IFHWADDRLEN];
 
         void startFlowTable(RouteSource source);
-        void startPortMapper(vector<Interface>);
+        void startPortMapper();
         bool process(const string &from, const string &to,
                      const string &channel, IPCMessage& msg);
 
         int set_hwaddr_byname(const char * ifname, uint8_t hwaddr[], int16_t flags);
         uint32_t get_port_number(string ifName);
-        vector<Interface> load_interfaces();
+        map<string, Interface> load_interfaces();
 };
 #endif /* RFCLIENT_HH */

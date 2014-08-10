@@ -82,6 +82,10 @@ void FlowTable::operator()() {
     GWResolver.join();
 }
 
+uint64_t FlowTable::get_vm_id() {
+    return this->vm_id;
+}
+
 void FlowTable::clear() {
     this->routeTable.clear();
     boost::lock_guard<boost::mutex> lock(hostTableMutex);
@@ -222,12 +226,9 @@ int FlowTable::updateHostTable(struct nlmsghdr *n) {
         return 0;
     }
 
-    /*
-    if (ndmsg_ptr->ndm_state != NUD_REACHABLE) {
-        cout << "ndm_state: " << (uint16_t) ndmsg_ptr->ndm_state << endl;
+    if (strcmp(intf, DEFAULT_RFCLIENT_INTERFACE) == 0) {
         return 0;
     }
-    */
 
     boost::scoped_ptr<HostEntry> hentry(new HostEntry());
 
@@ -359,6 +360,10 @@ int FlowTable::updateRouteTable(struct nlmsghdr *n) {
         default:
             break;
         }
+    }
+
+    if (strcmp(intf, DEFAULT_RFCLIENT_INTERFACE) == 0) {
+        return 0;
     }
 
     rentry->netmask = IPAddress(IPV4, rtmsg_ptr->rtm_dst_len);

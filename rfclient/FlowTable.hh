@@ -45,6 +45,7 @@ class FlowTable {
         int updateHostTable(struct nlmsghdr*);
         int updateRouteTable(struct nlmsghdr*);
         void updateNHLFE(nhlfe_msg_t *nhlfe_msg);
+        uint64_t get_vm_id();
 
     private:
         RouteSource source;

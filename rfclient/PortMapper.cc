@@ -10,10 +10,10 @@
 #define BUFFER_SIZE 23 /* Mapping packet size. */
 #define SLEEP_TIME boost::posix_time::seconds(10)
 
-PortMapper::PortMapper(uint64_t vm_id, const vector<Interface> &ifaces) {
+PortMapper::PortMapper(uint64_t vm_id, map<int, Interface*> *ifaces, boost::mutex *ifMutex) {
     this->id = vm_id;
-    this->interfaces = ifaces;
-    /* XXX: This list of interfaces is never updated. */
+    this->ifaces = ifaces;
+    this->ifMutex = ifMutex;
 }
 
 /**
@@ -25,9 +25,12 @@ void PortMapper::operator()() {
         boost::system_time timeout = boost::get_system_time() + SLEEP_TIME;
 
         /* Grab list of interfaces from RFClient, iterate, send map packet */
-        vector<Interface>::iterator it;
-        for (it = this->interfaces.begin(); it != this->interfaces.end(); it++) {
-            this->send_port_map(*it);
+        {
+            boost::lock_guard<boost::mutex> lock(*(this->ifMutex));
+            map<int, Interface*>::iterator it;
+            for (it = this->ifaces->begin(); it != this->ifaces->end(); it++) {
+                this->send_port_map(*(it->second));
+            }
         }
 
         boost::this_thread::sleep(timeout);

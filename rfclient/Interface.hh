@@ -8,8 +8,7 @@ class Interface {
     public:
         uint32_t port;
         string name;
-        IPAddress address;
-        IPAddress netmask;
+        std::vector<IPAddress> addresses;
         MACAddress hwaddress;
         bool active;
 
@@ -21,8 +20,7 @@ class Interface {
             if (this != &other) {
                 this->port = other.port;
                 this->name = other.name;
-                this->address = other.address;
-                this->netmask = other.netmask;
+                this->addresses = other.addresses;
                 this->hwaddress = other.hwaddress;
                 this->active = other.active;
             }
@@ -33,8 +31,7 @@ class Interface {
             return
                 (this->port == other.port) and
                 (this->name == other.name) and
-                (this->address == other.address) and
-                (this->netmask == other.netmask) and
+                (this->addresses == other.addresses) and
                 (this->hwaddress == other.hwaddress) and
                 (this->active == other.active);
         }

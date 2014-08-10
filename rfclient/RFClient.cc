@@ -1,8 +1,12 @@
+#include <linux/if_link.h>
 #include <ifaddrs.h>
 #include <syslog.h>
 #include <arpa/inet.h>
+#include <netdb.h>
+#include <net/ethernet.h>
 #include <net/if_arp.h>
 #include <sys/ioctl.h>
+#include <sys/socket.h>
 
 #include <cstdlib>
 #include <boost/thread.hpp>
@@ -13,6 +17,7 @@
 using namespace std;
 
 #define PORT_ERROR (0xffffffff)
+
 
 /* Get the MAC address of the interface. */
 int get_hwaddr_byname(const char * ifname, uint8_t hwaddr[]) {
@@ -83,20 +88,28 @@ RFClient::RFClient(uint64_t id, const string &address, RouteSource source) {
     string id_str = to_string<uint64_t>(id);
     syslog(LOG_INFO, "Starting RFClient (vm_id=%s)", id_str.c_str());
     ipc = IPCMessageServiceFactory::forClient(address, id_str);
+    map<string, Interface> ifaces = this->load_interfaces();
+    syslog(LOG_INFO, "loaded %lu interfaces", ifaces.size());
+    if (ifaces.size() == 0) {
+        exit(-1);
+    }
 
-    vector<Interface> ifaces = this->load_interfaces();
-    vector<Interface>::iterator it;
-    for (it = ifaces.begin(); it != ifaces.end(); it++) {
-        this->ifacesMap[it->name] = *it;
-        this->interfaces[it->port] = &this->ifacesMap[it->name];
-
-        PortRegister msg(this->id, it->port, it->hwaddress);
-        this->ipc->send(RFCLIENT_RFSERVER_CHANNEL, RFSERVER_ID, msg);
-        syslog(LOG_INFO, "Registering client port (vm_port=%d)", it->port);
+    {
+        std::vector<IPAddress> ip_addresses;
+        boost::lock_guard<boost::mutex> lock(this->ifMutex);
+        map<string, Interface>::iterator it;
+        for (it = ifaces.begin(); it != ifaces.end(); it++) {
+            const Interface &interface = it->second;
+            this->ifacesMap[interface.name] = interface;
+            this->interfaces[interface.port] = &this->ifacesMap[interface.name];
+            PortRegister msg(this->id, interface.port, interface.hwaddress);
+            this->ipc->send(RFCLIENT_RFSERVER_CHANNEL, RFSERVER_ID, msg);
+            syslog(LOG_INFO, "Registering client port (vm_port=%d)", interface.port);
+        }
     }
 
     this->startFlowTable(source);
-    this->startPortMapper(ifaces);
+    this->startPortMapper();
 
     ipc->listen(RFCLIENT_RFSERVER_CHANNEL, this, this, true);
 }
@@ -107,8 +120,8 @@ void RFClient::startFlowTable(RouteSource source) {
     t.detach();
 }
 
-void RFClient::startPortMapper(vector<Interface> ifaces) {
-    this->portMapper = new PortMapper(this->id, ifaces);
+void RFClient::startPortMapper() {
+    this->portMapper = new PortMapper(this->id, &(this->interfaces), &(this->ifMutex));
     boost::thread t(*this->portMapper);
     t.detach();
 }
@@ -133,7 +146,7 @@ bool RFClient::process(const string &, const string &, const string &,
             this->interfaces[vm_port]->active = false;
             break;
         case PCT_MAP_SUCCESS:
-            syslog(LOG_INFO, "Successfully mapped port(vm_port=%d)", vm_port);
+            syslog(LOG_INFO, "Successfully mapped port (vm_port=%d)", vm_port);
             this->interfaces[vm_port]->active = true;
             break;
         default:
@@ -212,48 +225,91 @@ uint32_t RFClient::get_port_number(string ifName) {
 }
 
 /**
- * Gather all of the interfaces on the system.
+ * Gather all of the OF-mapped interfaces on the system.
  *
  * Returns an empty vector on failure.
  */
-vector<Interface> RFClient::load_interfaces() {
+map<string, Interface> RFClient::load_interfaces() {
     struct ifaddrs *ifaddr, *ifa;
-    vector<Interface> result;
+    map<string, Interface> interfaces;
 
     if (getifaddrs(&ifaddr) == -1) {
         char error[BUFSIZ];
         strerror_r(errno, error, BUFSIZ);
         syslog(LOG_ERR, "getifaddrs: %s", error);
-        return result;
+        return interfaces;
     }
 
     for (ifa = ifaddr; ifa != NULL; ifa = ifa->ifa_next) {
-        int family = ifa->ifa_addr->sa_family;
+        if (ifa->ifa_addr->sa_family != AF_PACKET) {
+            continue;
+        }
 
-        if (family == AF_PACKET && strcmp(ifa->ifa_name, "eth0") != 0
-            && strcmp(ifa->ifa_name, "lo") != 0) {
-            string ifaceName = ifa->ifa_name;
-            get_hwaddr_byname(ifa->ifa_name, hwaddress);
+        if (strncmp(ifa->ifa_name, "eth", strlen("eth")) != 0) {
+            continue;
+        }
 
-            Interface interface;
-            interface.name = ifaceName;
-            interface.port = get_port_number(ifaceName);
-            if (interface.port == PORT_ERROR) {
-                printf("Ignoring interface %s\n", ifaceName.c_str());
-                continue;
+        if (strcmp(ifa->ifa_name, DEFAULT_RFCLIENT_INTERFACE) == 0) {
+            continue;
+        }
+
+        string ifaceName = ifa->ifa_name;
+        uint32_t port = get_port_number(ifaceName);
+
+        if (port == PORT_ERROR) {
+            syslog(LOG_INFO,
+                   "Cannot get port number for %s, ignoring\n",
+                   ifaceName.c_str());
+            continue;
+        }
+
+        get_hwaddr_byname(ifaceName.c_str(), hwaddress);
+
+        Interface interface;
+        interface.name = ifaceName;
+        interface.port = port;
+        interface.hwaddress = MACAddress(hwaddress);
+        interface.active = false;
+
+        interfaces[interface.name] = interface;
+    }
+
+    map<string, Interface>::iterator it;
+    char ip_addr[NI_MAXHOST];
+
+    for (ifa = ifaddr; ifa != NULL; ifa = ifa->ifa_next) {
+        it = interfaces.find(ifa->ifa_name);
+        if (it == interfaces.end()) {
+            continue;
+        }
+        if (ifa->ifa_addr->sa_family == AF_INET) {
+            getnameinfo(ifa->ifa_addr, sizeof(struct sockaddr_in),
+                        ip_addr, sizeof(ip_addr), NULL, 0, NI_NUMERICHOST);
+            it->second.addresses.push_back(IPAddress(IPV4, ip_addr));
+        }
+        if (ifa->ifa_addr->sa_family == AF_INET6) {
+            getnameinfo(ifa->ifa_addr, sizeof(struct sockaddr_in6),
+                        ip_addr, sizeof(ip_addr), NULL, 0, NI_NUMERICHOST);
+            // Drop interface scope if present.
+            char *scope_delim = strchr(ip_addr, '%');
+            if (scope_delim) {
+                *scope_delim = 0;
             }
-            interface.hwaddress = MACAddress(hwaddress);
-            interface.active = false;
-
-            printf("Loaded interface %s\n", interface.name.c_str());
-            syslog(LOG_INFO, "Loaded interface %s\n", interface.name.c_str());
-
-            result.push_back(interface);
+            it->second.addresses.push_back(IPAddress(IPV6, ip_addr));
         }
     }
 
     freeifaddrs(ifaddr);
-    return result;
+
+    for (it = interfaces.begin(); it != interfaces.end(); ++it) {
+        syslog(LOG_INFO, "loaded interface: %s", it->first.c_str());
+        std::vector<IPAddress>::iterator ip_it;
+        for (ip_it = it->second.addresses.begin(); ip_it != it->second.addresses.end(); ++ip_it) {
+            syslog(LOG_INFO, "interface %s has IP address %s", it->first.c_str(), ip_it->toString().c_str());
+        }
+    }
+
+    return interfaces;
 }
 
 void usage(char *name) {

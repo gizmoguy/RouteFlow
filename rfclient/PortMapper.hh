@@ -7,12 +7,13 @@
 
 class PortMapper {
     public:
-        PortMapper(uint64_t vm_id, const vector<Interface> &ifaces);
+        PortMapper(uint64_t vm_id, map<int, Interface*> *ifaces, boost::mutex *ifMutex);
         void operator()();
 
     private:
         uint64_t id;
-        vector<Interface> interfaces;
+        map<int, Interface*> *ifaces;
+        boost::mutex *ifMutex;
 
         void send_port_map(Interface &iface);
         int send_packet(const char ethName[], uint8_t port);
