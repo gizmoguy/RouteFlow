@@ -33,9 +33,8 @@
 
 typedef enum route_mod_type {
 	RMT_ADD,			/* Add flow to datapath */
-	RMT_DELETE			/* Remove flow from datapath */
-	/* Future implementation */
-	//RMT_MODIFY		/* Modify existing flow (Unimplemented) */
+	RMT_DELETE,			/* Remove flow from datapath */
+	RMT_CONTROLLER,			/* Send this flow unchanged to the datapath. */
 } RouteModType;
 
 typedef enum port_config_type {
@@ -52,5 +51,8 @@ typedef enum port_config_type {
 #define PRIORITY_LOW 0x4010
 #define PRIORITY_HIGH 0x8020
 #define PRIORITY_HIGHEST 0xC030
+
+#define TPORT_BGP 0x00B3
+#define OFPP_CONTROLLER 0xFFFFFFFD
 
 #endif /* __DEFS_H__ */

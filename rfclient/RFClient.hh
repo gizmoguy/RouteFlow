@@ -33,7 +33,8 @@ class RFClient : private RFProtocolFactory, private IPCMessageProcessor,
         void startPortMapper();
         bool process(const string &from, const string &to,
                      const string &channel, IPCMessage& msg);
-
+        RouteMod controllerRouteMod(uint32_t port, const IPAddress &ip_address);
+        void sendInterfaceToControllerRouteMods(const Interface &iface);
         int set_hwaddr_byname(const char * ifname, uint8_t hwaddr[], int16_t flags);
         uint32_t get_port_number(string ifName);
         map<string, Interface> load_interfaces();

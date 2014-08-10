@@ -124,14 +124,20 @@ class RFServer(RFProtocolFactory, IPC.IPCMessageProcessor):
                 # drop it.
                 if entry is None or entry.get_status() == RFENTRY_IDLE_VM_PORT:
                     self.log.info("Received RouteMod destined for unknown "
-                                  "datapath - Dropping (vm_id=%s)" %
-                                  (format_id(vm_id)))
+                                  "datapath - Dropping (vm_id=%s, vm_port=%d)" %
+                                  (format_id(vm_id), vm_port))
                     return
 
                 # Replace the VM id,port with the Datapath id.port
                 rm.set_id(int(entry.dp_id))
 
-                if rm.get_mod() is RMT_DELETE:
+                if rm.get_mod() is RMT_CONTROLLER:
+                    rm.actions.remove(action)
+                    rm.add_action(Action.CONTROLLER())
+                    self.ipc.send(RFSERVER_RFPROXY_CHANNEL,
+                                  str(entry.ct_id), rm)
+                    return
+                elif rm.get_mod() is RMT_DELETE:
                     # When deleting a route, we don't need an output action.
                     rm.actions.remove(action)
                 else:
@@ -291,45 +297,8 @@ class RFServer(RFProtocolFactory, IPC.IPCMessageProcessor):
             pass
         else:
             rm.add_option(Option.PRIORITY(PRIORITY_HIGH))
-            if operation_id == DC_RIPV2:
-                rm.add_match(Match.ETHERTYPE(ETHERTYPE_IP))
-                rm.add_match(Match.NW_PROTO(IPPROTO_UDP))
-                rm.add_match(Match.IPV4(IPADDR_RIPv2, IPV4_MASK_EXACT))
-            elif operation_id == DC_OSPF:
-                rm.add_match(Match.ETHERTYPE(ETHERTYPE_IP))
-                rm.add_match(Match.NW_PROTO(IPPROTO_OSPF))
-            elif operation_id == DC_ARP:
+            if operation_id == DC_ARP:
                 rm.add_match(Match.ETHERTYPE(ETHERTYPE_ARP))
-            elif operation_id == DC_ICMP:
-                rm.add_match(Match.ETHERTYPE(ETHERTYPE_IP))
-                rm.add_match(Match.NW_PROTO(IPPROTO_ICMP))
-            elif operation_id == DC_ICMPV6:
-                rm.add_match(Match.ETHERTYPE(ETHERTYPE_IPV6))
-                rm.add_match(Match.NW_PROTO(IPPROTO_ICMPV6))
-            elif operation_id == DC_BGP_PASSIVE:
-                rm.add_match(Match.ETHERTYPE(ETHERTYPE_IP))
-                rm.add_match(Match.NW_PROTO(IPPROTO_TCP))
-                rm.add_match(Match.TP_DST(TPORT_BGP))
-            elif operation_id == DC_BGP_ACTIVE:
-                rm.add_match(Match.ETHERTYPE(ETHERTYPE_IP))
-                rm.add_match(Match.NW_PROTO(IPPROTO_TCP))
-                rm.add_match(Match.TP_SRC(TPORT_BGP))
-            elif operation_id == DC_BGP_PASSIVEV6:
-                rm.add_match(Match.ETHERTYPE(ETHERTYPE_IPV6))
-                rm.add_match(Match.NW_PROTO(IPPROTO_TCP))
-                rm.add_match(Match.TP_DST(TPORT_BGP))
-            elif operation_id == DC_BGP_ACTIVEV6:
-                rm.add_match(Match.ETHERTYPE(ETHERTYPE_IPV6))
-                rm.add_match(Match.NW_PROTO(IPPROTO_TCP))
-                rm.add_match(Match.TP_SRC(TPORT_BGP))
-            elif operation_id == DC_LDP_PASSIVE:
-                rm.add_match(Match.ETHERTYPE(ETHERTYPE_IP))
-                rm.add_match(Match.NW_PROTO(IPPROTO_TCP))
-                rm.add_match(Match.TP_DST(TPORT_LDP))
-            elif operation_id == DC_LDP_ACTIVE:
-                rm.add_match(Match.ETHERTYPE(ETHERTYPE_IP))
-                rm.add_match(Match.NW_PROTO(IPPROTO_TCP))
-                rm.add_match(Match.TP_SRC(TPORT_LDP))
             elif operation_id == DC_VM_INFO:
                 rm.add_match(Match.ETHERTYPE(RF_ETH_PROTO))
             rm.add_action(Action.CONTROLLER())
@@ -350,17 +319,7 @@ class RFServer(RFProtocolFactory, IPC.IPCMessageProcessor):
                                               DC_CLEAR_FLOW_TABLE)
             # TODO: enforce order: clear should always be executed first
             self.send_datapath_config_message(ct_id, dp_id, DC_DROP_ALL)
-            self.send_datapath_config_message(ct_id, dp_id, DC_OSPF)
-            self.send_datapath_config_message(ct_id, dp_id, DC_BGP_PASSIVE)
-            self.send_datapath_config_message(ct_id, dp_id, DC_BGP_PASSIVEV6)
-            self.send_datapath_config_message(ct_id, dp_id, DC_BGP_ACTIVE)
-            self.send_datapath_config_message(ct_id, dp_id, DC_BGP_ACTIVEV6)
-            self.send_datapath_config_message(ct_id, dp_id, DC_RIPV2)
             self.send_datapath_config_message(ct_id, dp_id, DC_ARP)
-            self.send_datapath_config_message(ct_id, dp_id, DC_ICMP)
-            self.send_datapath_config_message(ct_id, dp_id, DC_ICMPV6)
-            self.send_datapath_config_message(ct_id, dp_id, DC_LDP_PASSIVE)
-            self.send_datapath_config_message(ct_id, dp_id, DC_LDP_ACTIVE)
             self.log.info("Configuring datapath (dp_id=%s)" % format_id(dp_id))
         return is_rfvs(dp_id)
 

@@ -126,6 +126,58 @@ void RFClient::startPortMapper() {
     t.detach();
 }
 
+RouteMod RFClient::controllerRouteMod(uint32_t port, const IPAddress &ip_address) {
+    RouteMod rm;
+    rm.set_mod(RMT_CONTROLLER);
+    rm.set_id(this->flowTable->get_vm_id());
+    if (ip_address.getVersion() == IPV4) {
+        rm.add_match(Match(RFMT_IPV4, ip_address, IPAddress(IPV4, FULL_IPV4_PREFIX)));
+    } else {
+        rm.add_match(Match(RFMT_IPV6, ip_address, IPAddress(IPV6, FULL_IPV6_PREFIX)));
+    }
+    rm.add_action(Action(RFAT_OUTPUT, port));
+    rm.add_option(Option(RFOT_PRIORITY, (uint16_t)PRIORITY_HIGH));
+    return rm;
+}
+
+void RFClient::sendInterfaceToControllerRouteMods(const Interface &iface) {
+    std::vector<IPAddress>::const_iterator it;
+    RouteMod rm;
+    uint32_t port = iface.port;
+    for (it = iface.addresses.begin(); it != iface.addresses.end(); ++it) {
+        /* ICMP traffic. */
+        if (it->getVersion() == IPV4) {
+            rm = controllerRouteMod(port, *it);
+            rm.add_match(Match(RFMT_NW_PROTO, (uint16_t)IPPROTO_ICMP));
+            this->ipc->send(RFCLIENT_RFSERVER_CHANNEL, RFSERVER_ID, rm);
+        } else {
+            rm = controllerRouteMod(port, *it);
+            rm.add_match(Match(RFMT_NW_PROTO, (uint16_t)IPPROTO_ICMPV6));
+            this->ipc->send(RFCLIENT_RFSERVER_CHANNEL, RFSERVER_ID, rm);
+            /* TODO: handle neighbor solicitation et al specifically,
+               like we do for IPv4 and ARP. */
+            rm = RouteMod();
+            rm.set_mod(RMT_CONTROLLER);
+            rm.set_id(this->flowTable->get_vm_id());
+            rm.add_action(Action(RFAT_OUTPUT, port));
+            rm.add_match(Match(RFMT_ETHERTYPE, (uint16_t)ETHERTYPE_IPV6));
+            rm.add_match(Match(RFMT_NW_PROTO, (uint16_t)IPPROTO_ICMPV6));
+            rm.add_option(Option(RFOT_PRIORITY, (uint16_t)(PRIORITY_LOW + 1)));
+            this->ipc->send(RFCLIENT_RFSERVER_CHANNEL, RFSERVER_ID, rm);
+        }
+        /* BGP */
+        rm = controllerRouteMod(port, *it);
+        rm.add_match(Match(RFMT_NW_PROTO, (uint16_t)IPPROTO_TCP));
+        rm.add_match(Match(RFMT_TP_SRC, (uint16_t)TPORT_BGP));
+        this->ipc->send(RFCLIENT_RFSERVER_CHANNEL, RFSERVER_ID, rm);
+        rm = controllerRouteMod(port, *it);
+        rm.add_match(Match(RFMT_NW_PROTO, (uint16_t)IPPROTO_TCP));
+        rm.add_match(Match(RFMT_TP_DST, (uint16_t)TPORT_BGP));
+        this->ipc->send(RFCLIENT_RFSERVER_CHANNEL, RFSERVER_ID, rm);
+        /* TODO: add other IGP traffic here - RIPv2 et al */
+    }
+}
+
 bool RFClient::process(const string &, const string &, const string &,
                        IPCMessage& msg) {
     int type = msg.get_type();
@@ -148,6 +200,7 @@ bool RFClient::process(const string &, const string &, const string &,
         case PCT_MAP_SUCCESS:
             syslog(LOG_INFO, "Successfully mapped port (vm_port=%d)", vm_port);
             this->interfaces[vm_port]->active = true;
+            sendInterfaceToControllerRouteMods(*(this->interfaces[vm_port]));
             break;
         default:
             syslog(LOG_WARNING, "Recieved unrecognised PortConfig message");
