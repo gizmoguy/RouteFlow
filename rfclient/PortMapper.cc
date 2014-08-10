@@ -76,7 +76,6 @@ int PortMapper::send_packet(const char ethName[], uint8_t port) {
     }
 
     /* If the interface is down we can't send the packet. */
-    syslog(LOG_INFO, "FLAG %d\n", req.ifr_flags & IFF_UP);
     if (!(req.ifr_flags & IFF_UP)) {
         goto exit;
     }
@@ -115,7 +114,7 @@ int PortMapper::send_packet(const char ethName[], uint8_t port) {
              (socklen_t) addrLen));
 
 exit:
-    if (error) {
+    if (error <= 0) {
         strerror_r(errno, buffer, BUFSIZ);
         syslog(LOG_ERR, "send_packet(): %s", buffer);
     }
