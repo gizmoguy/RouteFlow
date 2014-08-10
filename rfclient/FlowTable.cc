@@ -113,23 +113,12 @@ void FlowTable::GWResolverCb(FlowTable *ft) {
         }
         pr.advance(ROUTE_COOLDOWN);
 
-        bool existingEntry = false;
-        std::list<RouteEntry>::iterator iter = ft->routeTable.begin();
-        for (; iter != ft->routeTable.end(); iter++) {
-            if (pr.rentry == *iter) {
-                existingEntry = true;
-                break;
-            }
-        }
-
-        if (ft->deletedRoutes.count(pr.rentry.toString()) > 0) {
-            boost::lock_guard<boost::mutex> lock(ft->drMutex);
-            ft->deletedRoutes.erase(pr.rentry.toString());
-            if (pr.type != RMT_DELETE) {
-                syslog(LOG_INFO, "Removing cached route before insertion.");
-                continue;
-            }
-        }
+        const RouteEntry& re = pr.rentry;
+        const string re_key = re.toString();
+        const string addr_str = re.address.toString();
+        const string mask_str = re.netmask.toString();
+        const string gw_str = re.gateway.toString();
+        bool existingEntry = ft->routeTable.count(re_key) > 0;
 
         if (existingEntry && pr.type == RMT_ADD) {
             syslog(LOG_INFO, "Received duplicate route add for route %s\n",
@@ -143,10 +132,6 @@ void FlowTable::GWResolverCb(FlowTable *ft) {
             continue;
         }
 
-        const RouteEntry& re = pr.rentry;
-        const string addr_str = re.address.toString();
-        const string mask_str = re.netmask.toString();
-        const string gw_str = re.gateway.toString();
 
         if (pr.type != RMT_DELETE
             && ft->findHost(re.gateway) == MAC_ADDR_NONE) {
@@ -173,13 +158,20 @@ void FlowTable::GWResolverCb(FlowTable *ft) {
             continue;
         }
 
-        if (pr.type == RMT_ADD) {
-            ft->routeTable.push_back(pr.rentry);
-        } else if (pr.type == RMT_DELETE) {
-            ft->routeTable.remove(pr.rentry);
-        } else {
-            syslog(LOG_ERR, "Received unexpected RouteModType (%d)\n",
-                   pr.type);
+        switch (pr.type) {
+            case RMT_ADD:
+                ft->routeTable.insert(make_pair(re_key, re));
+                break;
+
+            case RMT_DELETE:
+                ft->routeTable.erase(re_key);
+                break;
+
+            default:
+                syslog(LOG_ERR,
+                       "Received unexpected RouteModType (%d)\n",
+                       pr.type);
+                continue;
         }
     }
 }
@@ -398,13 +390,9 @@ int FlowTable::updateRouteTable(struct nlmsghdr *n) {
             this->pendingRoutes.push(PendingRoute(RMT_ADD, *rentry));
             break;
         case RTM_DELROUTE: {
-            boost::lock_guard<boost::mutex> lock(drMutex);
-            std::pair<string, RouteEntry> pair(rentry->toString(), *rentry);
-
             syslog(LOG_INFO, "netlink->RTM_DELROUTE: net=%s, mask=%s, gw=%s",
                    net.c_str(), mask.c_str(), gw.c_str());
             this->pendingRoutes.push(PendingRoute(RMT_DELETE, *rentry));
-            this->deletedRoutes.insert(pair);
             break;
         }
     }

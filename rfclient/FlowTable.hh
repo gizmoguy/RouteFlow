@@ -64,13 +64,11 @@ class FlowTable {
         map<string, HostEntry> hostTable;
         boost::mutex hostTableMutex;
 
-        /* Known routes */
+        /* Routing table change requests. */
         SyncQueue<PendingRoute> pendingRoutes;
-        list<RouteEntry> routeTable;
 
-        /* Recently deleted routes */
-        map<string, RouteEntry> deletedRoutes;
-        boost::mutex drMutex;
+        /* Routing table. */
+        map<string, RouteEntry> routeTable;
 
         /* Cached neighbour discovery sockets */
         map<string, int> pendingNeighbours;
