@@ -392,9 +392,10 @@ class DataPlaneMap(IPCMessage):
         return s
 
 class RouteMod(IPCMessage):
-    def __init__(self, mod=None, id=None, matches=None, actions=None, options=None):
+    def __init__(self, mod=None, id=None, table=None, matches=None, actions=None, options=None):
         self.set_mod(mod)
         self.set_id(id)
+        self.set_table(table)
         self.set_matches(matches)
         self.set_actions(actions)
         self.set_options(options)
@@ -421,6 +422,16 @@ class RouteMod(IPCMessage):
             self.id = int(id)
         except:
             self.id = 0
+
+    def get_table(self):
+        return self.table
+
+    def set_table(self, table):
+        table = 0 if table is None else table
+        try:
+            self.table = int(id)
+        except:
+            self.table = 0
 
     def get_matches(self):
         return self.matches
@@ -464,6 +475,7 @@ class RouteMod(IPCMessage):
     def from_dict(self, data):
         self.set_mod(data["mod"])
         self.set_id(data["id"])
+        self.set_table(data["table"])
         self.set_matches(data["matches"])
         self.set_actions(data["actions"])
         self.set_options(data["options"])
@@ -472,6 +484,7 @@ class RouteMod(IPCMessage):
         data = {}
         data["mod"] = str(self.get_mod())
         data["id"] = str(self.get_id())
+        data["table"] = str(self.get_table())
         data["matches"] = self.get_matches()
         data["actions"] = self.get_actions()
         data["options"] = self.get_options()
@@ -481,6 +494,7 @@ class RouteMod(IPCMessage):
         s = "RouteMod\n"
         s += "  mod: " + str(self.get_mod()) + "\n"
         s += "  id: " + format_id(self.get_id()) + "\n"
+        s += "  table: " + str(self.get_table()) + "\n"
         s += "  matches:\n"
         for match in self.get_matches():
             s += "    " + str(Match.from_dict(match)) + "\n"
