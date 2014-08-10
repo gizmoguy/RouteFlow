@@ -80,6 +80,7 @@ class FlowTable {
         int getInterface( const char *iface, const char *type, Interface*);
 
         int initiateND(const char *hostAddr);
+        void stopND(const string &hostAddr);
         int resolveGateway(const IPAddress&, const Interface&);
         const MACAddress& findHost(const IPAddress& host);
 

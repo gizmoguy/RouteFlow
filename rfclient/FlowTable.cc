@@ -286,40 +286,20 @@ int FlowTable::updateHostTable(struct nlmsghdr *n) {
 
     switch (n->nlmsg_type) {
         case RTM_NEWNEIGH: {
-            this->sendToHw(RMT_ADD, *hentry);
-
             string host = hentry->address.toString();
+            syslog(LOG_INFO, "netlink->RTM_NEWNEIGH: ip=%s, mac=%s",
+                   host.c_str(), mac);
+            this->sendToHw(RMT_ADD, *hentry);
             {
                 // Add to host table
                 boost::lock_guard<boost::mutex> lock(hostTableMutex);
                 this->hostTable[host] = *hentry;
             }
-            {
-                // If we have been attempting neighbour discovery for this
-                // host, then we can close the associated socket.
-                boost::lock_guard<boost::mutex> lock(ndMutex);
-                map<string, int>::iterator iter = pendingNeighbours.find(host);
-                if (iter != pendingNeighbours.end()) {
-                    if (close(iter->second) == -1) {
-                        strerror_r(errno, error, BUFSIZ);
-                        syslog(LOG_ERR, "pendingNeighbours: %s", error);
-                    }
-                    pendingNeighbours.erase(host);
-                }
-            }
-
-            syslog(LOG_INFO, "netlink->RTM_NEWNEIGH: ip=%s, mac=%s",
-                   host.c_str(), mac);
+            // If we have been attempting neighbour discovery for this
+            // host, then we can close the associated socket.
+            stopND(host);
             break;
         }
-        /* TODO: enable this? It is causing serious problems. Why?
-        case RTM_DELNEIGH: {
-            this->sendToHw(RMT_DELETE, *hentry);
-            // TODO: delete from hostTable
-            boost::lock_guard<boost::mutex> lock(hostTableMutex);
-            break;
-        }
-        */
     }
 
     return 0;
@@ -475,6 +455,19 @@ int FlowTable::initiateND(const char *hostAddr) {
 
     connect(s, (struct sockaddr *)&store, sizeof(store));
     return s;
+}
+
+void FlowTable::stopND(const string &host) {
+    char error[BUFSIZ];
+    boost::lock_guard<boost::mutex> lock(ndMutex);
+    map<string, int>::iterator iter = pendingNeighbours.find(host);
+    if (iter != pendingNeighbours.end()) {
+        if (close(iter->second) == -1) {
+            strerror_r(errno, error, BUFSIZ);
+            syslog(LOG_ERR, "pendingNeighbours: %s", error);
+        }
+        pendingNeighbours.erase(host);
+    }
 }
 
 /**
