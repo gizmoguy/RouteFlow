@@ -98,9 +98,6 @@ void FlowTable::GWResolverCb(FlowTable *ft) {
     while (true) {
         PendingRoute pr;
         ft->pendingRoutes.wait_and_pop(pr);
-        if (ft->pendingRoutes.size()) {
-          syslog(LOG_INFO, "%lu in pending routes", ft->pendingRoutes.size());
-        }
 
         /* If the head of the list is in no hurry to be resolved,
          * then let's just sleep for a while until it's ready. */
@@ -117,39 +114,37 @@ void FlowTable::GWResolverCb(FlowTable *ft) {
         const string gw_str = re.gateway.toString();
         bool existingEntry = ft->routeTable.count(re_key) > 0;
 
-        if (existingEntry && pr.type == RMT_ADD) {
-            syslog(LOG_INFO, "Received duplicate route add for route %s\n",
-                   pr.rentry.address.toString().c_str());
+        if (pr.type == RMT_ADD && existingEntry) {
+            syslog(LOG_INFO,
+                   "Received duplicate route add for route %s\n",
+                   addr_str.c_str());
             continue;
         }
 
-        if (!existingEntry && pr.type == RMT_DELETE) {
-            syslog(LOG_INFO, "Received route removal for %s but route %s.\n",
-                   pr.rentry.address.toString().c_str(), "cannot be found");
+        if (pr.type == RMT_DELETE && !existingEntry) {
+            syslog(LOG_INFO,
+                   "Received route removal for %s but cannot be found\n",
+                   addr_str.c_str());
             continue;
         }
 
-
-        if (pr.type != RMT_DELETE
-            && ft->findHost(re.gateway) == MAC_ADDR_NONE) {
-            /* Host is unresolved. Attempt to resolve it. */
-            if (ft->resolveGateway(re.gateway, re.interface) < 0) {
-                /* If we can't resolve the gateway, put it to the end of the
-                 * queue. Routes with unresolvable gateways will constantly
-                 * loop through this code, popping and re-pushing. */
-                syslog(LOG_WARNING, "An error occurred while attempting to "
-                       "resolve %s/%s.\n", addr_str.c_str(), mask_str.c_str());
-            } else {
-                /* A resolution is scheduled, so try again later. */
+        if (pr.type == RMT_ADD) {
+            if (ft->findHost(re.gateway) == MAC_ADDR_NONE) {
+                if (ft->resolveGateway(re.gateway, re.interface) < 0) {
+                    syslog(LOG_WARNING,
+                           "An error occurred while attempting to resolve %s/%s.\n",
+                            addr_str.c_str(), mask_str.c_str());
+                }
                 ft->pendingRoutes.push(pr);
+                continue;
             }
-            continue;
         }
 
-        syslog(LOG_INFO, "calling sendToHw with %s/%s via %s",
-                         addr_str.c_str(), mask_str.c_str(), gw_str.c_str());
+        syslog(LOG_INFO,
+               "calling sendToHw with %s/%s via %s",
+               addr_str.c_str(), mask_str.c_str(), gw_str.c_str());
         if (ft->sendToHw(pr.type, pr.rentry) < 0) {
-            syslog(LOG_WARNING, "An error occurred while pushing %s/%s.\n",
+            syslog(LOG_WARNING, "An error occurred while pushing %s/%s\n",
                    addr_str.c_str(), mask_str.c_str());
             ft->pendingRoutes.push(pr);
             continue;
@@ -458,9 +453,7 @@ void FlowTable::stopND(const string &host) {
 /**
  * Initiates the gateway resolution process for the given host.
  *
- * Returns:
- *  0 if address resolution is currently being performed
- * -1 on error (usually an issue with the socket)
+ * Returns 0 on success, -1 on error (usually an issue with the socket)
  */
 int FlowTable::resolveGateway(const IPAddress& gateway,
                               const Interface& iface) {
@@ -576,7 +569,7 @@ int FlowTable::sendToHw(RouteModType mod, const IPAddress& addr,
                          const IPAddress& mask, const Interface& local_iface,
                          const MACAddress& gateway) {
     if (!local_iface.active) {
-        syslog(LOG_INFO, "Cannot send RouteMod for down port\n");
+        syslog(LOG_INFO, "Cannot send RouteMod for down port %s\n", local_iface.name.c_str());
         return -1;
     }
 
@@ -643,7 +636,9 @@ void FlowTable::updateNHLFE(nhlfe_msg_t *nhlfe_msg) {
     }
 
     if (!iface.active) {
-        syslog(LOG_WARNING, "Cannot send route via inactive interface");
+        syslog(LOG_WARNING, 
+               "Cannot send route via inactive interface %s",
+               iface.name.c_str());
         return;
     }
 
