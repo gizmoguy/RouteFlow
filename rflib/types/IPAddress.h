@@ -8,6 +8,9 @@
 #include <sstream>
 #include <string>
 
+#define FULL_IPV4_PREFIX 32
+#define FULL_IPV6_PREFIX 128
+
 enum { IPV4 = 4, IPV6 = 6 };
 
 using namespace std;
