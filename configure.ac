@@ -19,7 +19,6 @@ AM_INIT_AUTOMAKE
 
 AC_CHECK_HEADERS([boost/scoped_array.hpp], [], [AC_MSG_ERROR([Cannot find Boost system headers.])])
 AC_CHECK_HEADERS([boost/thread.hpp], [], [AC_MSG_ERROR([Cannot find Boost threading headers.])])
-AC_CHECK_HEADERS([mongo/bson/bson.h], [], [AC_MSG_ERROR([Cannot find MongoDB BSON headers.])])
 
 LIBS="-lboost_thread -lboost_system -lboost_filesystem -lboost_program_options"
 
@@ -39,7 +38,11 @@ AC_ARG_WITH([bson],
         [Specify a non-standard path to the mongo C++ driver (bson) library])],
     [AC_CONFIG_LINKS([rflib/bson/mongo:$with_bson])],
     [with_bson=""])
-AM_CONDITIONAL([LOCAL_BSON], [test "x$with_bson" != "x"])
+AM_CONDITIONAL([LOCAL_BSON], [test -e "$with_bson"/bson/bson.h])
+AC_CHECK_HEADERS([mongo/bson/bson.h], [],
+                 [AM_COND_IF([LOCAL_BSON],
+                             [AC_MSG_NOTICE([Building local BSON from $with_bson])],
+                             [AC_MSG_ERROR([Cannot find MongoDB BSON headers.])])])
 
 AM_COND_IF([USE_MONGO],
            [AC_CHECK_HEADERS([mongo/client/dbclient.h], [],

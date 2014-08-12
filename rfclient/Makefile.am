@@ -1,6 +1,6 @@
 bin_PROGRAMS = rfclient
 
-rfclient_CXXFLAGS = -I$(top_srcdir)/rflib @AM_CXXFLAGS@
+rfclient_CXXFLAGS = -I$(top_srcdir)/rflib -I$(top_builddir)/rflib/bson @AM_CXXFLAGS@
 AM_LDFLAGS = -lrt -lnetlink -lutil @AM_LDFLAGS@
 if USE_MONGO
 AM_LDFLAGS += -lmongoclient
