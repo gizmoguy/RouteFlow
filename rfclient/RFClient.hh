@@ -21,11 +21,13 @@ class RFClient : private RFProtocolFactory, private IPCMessageProcessor,
         FlowTable* flowTable;
         PortMapper* portMapper;
         IPCMessageService* ipc;
+        SyncQueue<RouteMod> rm_q;
+        boost::mutex rm_outstanding;
         uint64_t id;
 
         boost::mutex ifMutex; /* This guards both of the maps below. */
         map<string, Interface> ifacesMap;
-        map<int, Interface*> interfaces;
+        map<int, Interface*> physicalInterfaces;
 
         uint8_t hwaddress[IFHWADDRLEN];
 
@@ -33,10 +35,14 @@ class RFClient : private RFProtocolFactory, private IPCMessageProcessor,
         void startPortMapper();
         bool process(const string &from, const string &to,
                      const string &channel, IPCMessage& msg);
-        RouteMod controllerRouteMod(uint32_t port, const IPAddress &ip_address);
+        void sendRm(RouteMod rm);
+        RouteMod controllerRouteMod(uint32_t port, uint32_t vlan, MACAddress hwaddress, 
+                                    bool matchIP, const IPAddress &ip_address);
         void sendInterfaceToControllerRouteMods(const Interface &iface);
+        void sendAllInterfaceToControllerRouteMods(uint32_t vm_port);
+        void deactivateInterfaces(uint32_t vm_port);
         int set_hwaddr_byname(const char * ifname, uint8_t hwaddr[], int16_t flags);
-        uint32_t get_port_number(string ifName);
+        uint32_t get_port_number(string ifName, bool *physical, uint32_t *vlan);
         map<string, Interface> load_interfaces();
 };
 #endif /* RFCLIENT_HH */

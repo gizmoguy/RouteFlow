@@ -3,8 +3,10 @@
 #include <syslog.h>
 #include <arpa/inet.h>
 #include <netdb.h>
+#include <netinet/ether.h>
 #include <net/ethernet.h>
 #include <net/if_arp.h>
+#include <netpacket/packet.h>
 #include <sys/ioctl.h>
 #include <sys/socket.h>
 
@@ -19,34 +21,53 @@ using namespace std;
 #define PORT_ERROR (0xffffffff)
 
 
-/* Get the MAC address of the interface. */
-int get_hwaddr_byname(const char * ifname, uint8_t hwaddr[]) {
-    struct ifreq ifr;
-    int sock;
-
-    if ((NULL == ifname) || (NULL == hwaddr)) {
+int send_ioctl(const char * ifname, struct ifreq *ifr, int req) {
+    if (NULL == ifname) {
         return -1;
     }
 
-    sock = socket(AF_INET, SOCK_STREAM, 0);
+    int sock = socket(AF_INET, SOCK_STREAM, 0);
     if (sock < 0) {
         return -1;
     }
 
-    strncpy(ifr.ifr_name, ifname, sizeof(ifr.ifr_name) - 1);
-    ifr.ifr_name[sizeof(ifr.ifr_name) - 1] = '\0';
+    strncpy(ifr->ifr_name, ifname, sizeof(ifr->ifr_name) - 1);
+    ifr->ifr_name[sizeof(ifr->ifr_name) - 1] = '\0';
 
-    if (-1 == ioctl(sock, SIOCGIFHWADDR, &ifr)) {
+    int ret = ioctl(sock, req, ifr);
+    if (ret < 0) {
         char error[BUFSIZ];
         strerror_r(errno, error, BUFSIZ);
-        syslog(LOG_WARNING, "ioctl(SIOCGIFHWADDR): %s", error);
+        syslog(LOG_WARNING, "ioctl(%d): %s", req, error);
+    }
+
+    close(sock);
+    return ret;
+}
+
+/* Is interface running? */
+int is_interface_running(const char * ifname) {
+    struct ifreq ifr;
+
+    if (send_ioctl(ifname, &ifr, SIOCGIFFLAGS) < 0) {
+        return -1;
+    }    
+
+    return ifr.ifr_flags & IFF_RUNNING;
+}
+
+/* Get the MAC address of the interface. */
+int get_hwaddr_byname(const char * ifname, uint8_t hwaddr[]) {
+    if ((NULL == ifname) || (NULL == hwaddr)) {
+        return -1;
+    }
+
+    struct ifreq ifr; 
+    if (send_ioctl(ifname, &ifr, SIOCGIFHWADDR)) {
         return -1;
     }
 
     std::memcpy(hwaddr, ifr.ifr_ifru.ifru_hwaddr.sa_data, IFHWADDRLEN);
-
-    close(sock);
-
     return 0;
 }
 
@@ -88,9 +109,9 @@ RFClient::RFClient(uint64_t id, const string &address, RouteSource source) {
     string id_str = to_string<uint64_t>(id);
     syslog(LOG_INFO, "Starting RFClient (vm_id=%s)", id_str.c_str());
     ipc = IPCMessageServiceFactory::forClient(address, id_str);
-    map<string, Interface> ifaces = this->load_interfaces();
-    syslog(LOG_INFO, "loaded %lu interfaces", ifaces.size());
-    if (ifaces.size() == 0) {
+    this->ifacesMap = this->load_interfaces();
+    syslog(LOG_INFO, "loaded %lu interfaces", this->ifacesMap.size());
+    if (this->ifacesMap.size() == 0) {
         exit(-1);
     }
 
@@ -98,83 +119,131 @@ RFClient::RFClient(uint64_t id, const string &address, RouteSource source) {
         std::vector<IPAddress> ip_addresses;
         boost::lock_guard<boost::mutex> lock(this->ifMutex);
         map<string, Interface>::iterator it;
-        for (it = ifaces.begin(); it != ifaces.end(); it++) {
-            const Interface &interface = it->second;
-            this->ifacesMap[interface.name] = interface;
-            this->interfaces[interface.port] = &this->ifacesMap[interface.name];
-            PortRegister msg(this->id, interface.port, interface.hwaddress);
-            this->ipc->send(RFCLIENT_RFSERVER_CHANNEL, RFSERVER_ID, msg);
-            syslog(LOG_INFO, "Registering client port (vm_port=%d)", interface.port);
+        for (it = this->ifacesMap.begin(); it != this->ifacesMap.end(); ++it) {
+            const Interface &iface = it->second;
+            if (iface.physical) {
+                this->physicalInterfaces[iface.port] = &it->second;
+                PortRegister msg(this->id, iface.port, iface.hwaddress);
+                this->ipc->send(RFCLIENT_RFSERVER_CHANNEL, RFSERVER_ID, msg);
+                syslog(LOG_INFO,
+                       "Registering client port (vm_port=%d)",
+                       iface.port);
+            }
         }
     }
 
     this->startFlowTable(source);
     this->startPortMapper();
 
-    ipc->listen(RFCLIENT_RFSERVER_CHANNEL, this, this, true);
+    ipc->listen(RFCLIENT_RFSERVER_CHANNEL, this, this, false);
+
+    for (;;) {
+       RouteMod rm;
+       this->rm_q.wait_and_pop(rm);
+       this->rm_outstanding.lock();
+       this->ipc->send(RFCLIENT_RFSERVER_CHANNEL, RFSERVER_ID, rm);
+    }
 }
 
 void RFClient::startFlowTable(RouteSource source) {
-    this->flowTable = new FlowTable(this->id, this, this->ipc, source);
+    this->flowTable = new FlowTable(this->id, this, &(this->rm_q), source);
     boost::thread t(*this->flowTable);
     t.detach();
 }
 
 void RFClient::startPortMapper() {
-    this->portMapper = new PortMapper(this->id, &(this->interfaces), &(this->ifMutex));
+    this->portMapper = new PortMapper(this->id, &(this->physicalInterfaces), &(this->ifMutex));
     boost::thread t(*this->portMapper);
     t.detach();
 }
 
-RouteMod RFClient::controllerRouteMod(uint32_t port, const IPAddress &ip_address) {
+void RFClient::sendRm(RouteMod rm) {
+    this->rm_q.push(rm);
+}
+
+RouteMod RFClient::controllerRouteMod(uint32_t port, uint32_t vlan, MACAddress hwaddress,
+                                      bool matchIP, const IPAddress &ip_address) {
     RouteMod rm;
     rm.set_mod(RMT_CONTROLLER);
     rm.set_id(this->flowTable->get_vm_id());
-    if (ip_address.getVersion() == IPV4) {
-        rm.add_match(Match(RFMT_IPV4, ip_address, IPAddress(IPV4, FULL_IPV4_PREFIX)));
-    } else {
-        rm.add_match(Match(RFMT_IPV6, ip_address, IPAddress(IPV6, FULL_IPV6_PREFIX)));
+    rm.set_vm_port(port);
+    rm.add_match(Match(RFMT_ETHERNET, hwaddress.toString()));
+    if (vlan) {
+        rm.add_match(Match(RFMT_VLAN_ID, vlan));
     }
-    rm.add_action(Action(RFAT_OUTPUT, port));
+    if (matchIP ){
+        if (ip_address.getVersion() == IPV4) {
+            rm.add_match(Match(RFMT_IPV4, ip_address, IPAddress(IPV4, FULL_IPV4_PREFIX)));
+        } else {
+            rm.add_match(Match(RFMT_IPV6, ip_address, IPAddress(IPV6, FULL_IPV6_PREFIX)));
+        }
+    }
     rm.add_option(Option(RFOT_PRIORITY, (uint16_t)PRIORITY_HIGH));
     return rm;
 }
 
 void RFClient::sendInterfaceToControllerRouteMods(const Interface &iface) {
+    uint32_t port = iface.port;
+    uint32_t vlan = iface.vlan;
+    MACAddress hwaddress = iface.hwaddress;
     std::vector<IPAddress>::const_iterator it;
     RouteMod rm;
-    uint32_t port = iface.port;
-    for (it = iface.addresses.begin(); it != iface.addresses.end(); ++it) {
-        /* ICMP traffic. */
-        if (it->getVersion() == IPV4) {
-            rm = controllerRouteMod(port, *it);
-            rm.add_match(Match(RFMT_NW_PROTO, (uint16_t)IPPROTO_ICMP));
-            this->ipc->send(RFCLIENT_RFSERVER_CHANNEL, RFSERVER_ID, rm);
-        } else {
-            rm = controllerRouteMod(port, *it);
-            rm.add_match(Match(RFMT_NW_PROTO, (uint16_t)IPPROTO_ICMPV6));
-            this->ipc->send(RFCLIENT_RFSERVER_CHANNEL, RFSERVER_ID, rm);
-            /* TODO: handle neighbor solicitation et al specifically,
-               like we do for IPv4 and ARP. */
-            rm = RouteMod();
-            rm.set_mod(RMT_CONTROLLER);
-            rm.set_id(this->flowTable->get_vm_id());
-            rm.add_action(Action(RFAT_OUTPUT, port));
-            rm.add_match(Match(RFMT_ETHERTYPE, (uint16_t)ETHERTYPE_IPV6));
-            rm.add_match(Match(RFMT_NW_PROTO, (uint16_t)IPPROTO_ICMPV6));
-            rm.add_option(Option(RFOT_PRIORITY, (uint16_t)(PRIORITY_LOW + 1)));
-            this->ipc->send(RFCLIENT_RFSERVER_CHANNEL, RFSERVER_ID, rm);
+    for (it = iface.addresses.begin();
+         it != iface.addresses.end();
+         ++it) {
+         /* ICMP traffic. */
+         if (it->getVersion() == IPV4) {
+             rm = controllerRouteMod(port, vlan, hwaddress, true, *it);
+             rm.add_match(Match(RFMT_NW_PROTO, (uint16_t)IPPROTO_ICMP));
+             sendRm(rm);
+         } else {
+             rm = controllerRouteMod(port, vlan, hwaddress, true, *it);
+             rm.add_match(Match(RFMT_NW_PROTO, (uint16_t)IPPROTO_ICMPV6));
+             sendRm(rm);
+             this->ipc->send(RFCLIENT_RFSERVER_CHANNEL, RFSERVER_ID, rm);
+             /* TODO: handle neighbor solicitation et al specifically, 
+                      like we do for IPv4 and ARP. */
+             rm = controllerRouteMod(port, vlan, hwaddress, false, *it);
+             rm.add_match(Match(RFMT_ETHERTYPE, (uint16_t)ETHERTYPE_IPV6));
+             rm.add_match(Match(RFMT_NW_PROTO, (uint16_t)IPPROTO_ICMPV6));
+             rm.add_option(Option(RFOT_PRIORITY, (uint16_t)(PRIORITY_LOW + 1)));
+             sendRm(rm);
+         }
+         /* BGP */
+         rm = controllerRouteMod(port, vlan, hwaddress, true, *it);
+         rm.add_match(Match(RFMT_NW_PROTO, (uint16_t)IPPROTO_TCP));
+         rm.add_match(Match(RFMT_TP_SRC, (uint16_t)TPORT_BGP));
+         sendRm(rm);
+         rm = controllerRouteMod(port, vlan, hwaddress, true, *it);
+         rm.add_match(Match(RFMT_NW_PROTO, (uint16_t)IPPROTO_TCP));
+         rm.add_match(Match(RFMT_TP_DST, (uint16_t)TPORT_BGP));
+         sendRm(rm);
+         /* TODO: add other IGP traffic here - RIPv2 et al */
+    }
+}
+
+void RFClient::sendAllInterfaceToControllerRouteMods(uint32_t vm_port) {
+    std::map<string, Interface>::iterator it;
+    for (it = this->ifacesMap.begin();
+         it != this->ifacesMap.end();
+         ++it) {
+        Interface &iface = it->second;
+        if (iface.port == vm_port) {
+            iface.active = true;
+            sendInterfaceToControllerRouteMods(iface);
         }
-        /* BGP */
-        rm = controllerRouteMod(port, *it);
-        rm.add_match(Match(RFMT_NW_PROTO, (uint16_t)IPPROTO_TCP));
-        rm.add_match(Match(RFMT_TP_SRC, (uint16_t)TPORT_BGP));
-        this->ipc->send(RFCLIENT_RFSERVER_CHANNEL, RFSERVER_ID, rm);
-        rm = controllerRouteMod(port, *it);
-        rm.add_match(Match(RFMT_NW_PROTO, (uint16_t)IPPROTO_TCP));
-        rm.add_match(Match(RFMT_TP_DST, (uint16_t)TPORT_BGP));
-        this->ipc->send(RFCLIENT_RFSERVER_CHANNEL, RFSERVER_ID, rm);
-        /* TODO: add other IGP traffic here - RIPv2 et al */
+    }
+}
+
+void RFClient::deactivateInterfaces(uint32_t vm_port) {
+    std::map<string, Interface>::iterator it;
+    for (it = this->ifacesMap.begin();
+         it != this->ifacesMap.end();
+         ++it) {
+        Interface &iface = it->second;
+        if (iface.port == vm_port) {
+            iface.active = false;
+        }
     }
 }
 
@@ -189,24 +258,28 @@ bool RFClient::process(const string &, const string &, const string &,
         uint32_t operation_id = config->get_operation_id();
 
         switch (operation_id) {
-        case PCT_MAP_REQUEST:
-            syslog(LOG_WARNING, "Received deprecated PortConfig (vm_port=%d) "
-                   "(type: %d)", vm_port, operation_id);
-            break;
-        case PCT_RESET:
-            syslog(LOG_INFO, "Received port reset (vm_port=%d)", vm_port);
-            this->interfaces[vm_port]->active = false;
-            break;
-        case PCT_MAP_SUCCESS:
-            syslog(LOG_INFO, "Successfully mapped port (vm_port=%d)", vm_port);
-            this->interfaces[vm_port]->active = true;
-            sendInterfaceToControllerRouteMods(*(this->interfaces[vm_port]));
-            break;
-        default:
-            syslog(LOG_WARNING, "Recieved unrecognised PortConfig message");
-            return false;
+            case PCT_MAP_REQUEST:
+                syslog(LOG_WARNING, "Received deprecated PortConfig (vm_port=%d) "
+                                    "(type: %d)", vm_port, operation_id);
+                break;
+            case PCT_RESET:
+                syslog(LOG_INFO, "Received port reset (vm_port=%d)", vm_port);
+                deactivateInterfaces(vm_port);
+                break;
+            case PCT_MAP_SUCCESS:
+                syslog(LOG_INFO, "Successfully mapped port (vm_port=%d)", vm_port);
+                sendAllInterfaceToControllerRouteMods(vm_port);
+                break;
+            case PCT_ROUTEMOD_ACK:
+                syslog(LOG_INFO, "Got RouteMod ack (vm_port=%d)", vm_port);
+                this->rm_outstanding.unlock();
+                break;
+            default:
+                syslog(LOG_WARNING, "Received unrecognised PortConfig message");
+                return false;
         }
     } else {
+        syslog(LOG_WARNING, "Got unknown msg %d", type);
         return false;
     }
 
@@ -262,18 +335,28 @@ int RFClient::set_hwaddr_byname(const char * ifname, uint8_t hwaddr[],
 }
 
 /**
- * Converts the given interface string into a logical port number.
+ * Converts the given interface string into a logical port number
+ * (ignoring VLAN number).
  *
  * Returns PORT_ERROR on error.
  */
-uint32_t RFClient::get_port_number(string ifName) {
-    size_t pos = ifName.find_first_of("123456789");
-    if (pos >= ifName.length()) {
+uint32_t RFClient::get_port_number(string ifName, bool *physical, uint32_t *vlan) {
+    const char kDigits[] = "0123456789";
+    size_t first_pos = ifName.find_first_of(kDigits);
+    if (first_pos == string::npos) {
         return PORT_ERROR;
     }
-    string port_num = ifName.substr(pos, ifName.length() - pos + 1);
-
-    /* TODO: Do a better job of determining interface numbers */
+    string port_num;
+    size_t last_pos = ifName.find_first_not_of(kDigits, first_pos);
+    if (last_pos == string::npos) {
+        *physical = true;
+        port_num = ifName.substr(first_pos, string::npos);
+    } else {
+        *physical = false;
+        port_num = ifName.substr(first_pos, last_pos - first_pos);
+        string vlan_num = ifName.substr(last_pos + 1, string::npos);
+        *vlan = atoi(vlan_num.c_str());
+    }
     return atoi(port_num.c_str());
 }
 
@@ -307,24 +390,34 @@ map<string, Interface> RFClient::load_interfaces() {
         }
 
         string ifaceName = ifa->ifa_name;
-        uint32_t port = get_port_number(ifaceName);
+        bool physical = false;
+        uint32_t vlan = 0;
+        uint32_t port = get_port_number(ifaceName, &physical, &vlan);
 
         if (port == PORT_ERROR) {
-            syslog(LOG_INFO,
+            syslog(LOG_INFO, 
                    "Cannot get port number for %s, ignoring\n",
                    ifaceName.c_str());
             continue;
         }
 
+        while (is_interface_running(ifaceName.c_str()) <= 0) {
+           syslog(LOG_INFO,
+                  "Waiting for %s to come up\n",
+                  ifaceName.c_str());
+           sleep(1);
+        }
+
         get_hwaddr_byname(ifaceName.c_str(), hwaddress);
 
-        Interface interface;
+        interfaces[ifaceName] = Interface();
+        Interface &interface = interfaces[ifaceName];
         interface.name = ifaceName;
         interface.port = port;
         interface.hwaddress = MACAddress(hwaddress);
         interface.active = false;
-
-        interfaces[interface.name] = interface;
+        interface.physical = physical;
+        interface.vlan = vlan;
     }
 
     map<string, Interface>::iterator it;
@@ -348,14 +441,14 @@ map<string, Interface> RFClient::load_interfaces() {
             if (scope_delim) {
                 *scope_delim = 0;
             }
-            it->second.addresses.push_back(IPAddress(IPV6, ip_addr));
+            it->second.addresses.push_back(IPAddress(IPV6, ip_addr));           
         }
     }
 
     freeifaddrs(ifaddr);
 
     for (it = interfaces.begin(); it != interfaces.end(); ++it) {
-        syslog(LOG_INFO, "loaded interface: %s", it->first.c_str());
+        syslog(LOG_INFO, "loaded interface: %s", it->second.toString().c_str());
         std::vector<IPAddress>::iterator ip_it;
         for (ip_it = it->second.addresses.begin(); ip_it != it->second.addresses.end(); ++ip_it) {
             syslog(LOG_INFO, "interface %s has IP address %s", it->first.c_str(), ip_it->toString().c_str());

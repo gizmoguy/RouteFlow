@@ -38,44 +38,44 @@ static int RTPollingCb(const struct sockaddr_nl*, struct nlmsghdr *n,
     return ft->updateRouteTable(n);
 }
 
-FlowTable::FlowTable(uint64_t id, InterfaceMap *ifm, IPCMessageService *ipc,
-                     RouteSource source) {
+FlowTable::FlowTable(uint64_t id, InterfaceMap *ifMap, SyncQueue<RouteMod> *rm_q, RouteSource source) {
     this->vm_id = id;
-    this->ifMap = ifm;
-    this->ipc = ipc;
+    this->ifMap = ifMap;
+    this->rm_q = rm_q;
     this->source = source;
 }
 
 FlowTable::FlowTable(const FlowTable& other) {
     this->vm_id = other.vm_id;
     this->ifMap = other.ifMap;
-    this->ipc = other.ipc;
+    this->rm_q = other.rm_q;
     this->source = other.source;
 }
 
 void FlowTable::operator()() {
-    FPMServer *fpm;
     rtnl_open(&rthNeigh, RTMGRP_NEIGH);
+    setsockopt(rthNeigh.fd, SOL_SOCKET, SO_RCVBUFFORCE, &nl_buffersize, sizeof(nl_buffersize));
     HTPolling = boost::thread(&rtnl_listen, &rthNeigh, &HTPollingCb, this);
 
     switch (this->source) {
-    case RS_NETLINK: {
-        syslog(LOG_NOTICE, "Netlink interface enabled");
-        rtnl_open(&rth, RTMGRP_IPV4_MROUTE | RTMGRP_IPV4_ROUTE
-                        | RTMGRP_IPV6_MROUTE | RTMGRP_IPV6_ROUTE);
-        RTPolling = boost::thread(&rtnl_listen, &rth, &RTPollingCb, this);
-        break;
-    }
-    case RS_FPM: {
-        fpm = new FPMServer(this);
-        RTPolling = boost::thread(*fpm);
-        syslog(LOG_NOTICE, "FPM interface enabled");
-        break;
-    }
-    default:
-        syslog(LOG_CRIT, "Invalid route source specified. Disabling route "
-               "updates.");
-        break;
+        case RS_NETLINK: {
+            syslog(LOG_NOTICE, "Netlink interface enabled");
+            rtnl_open(&rth, RTMGRP_IPV4_ROUTE | RTMGRP_IPV6_ROUTE |
+                            RTMGRP_IPV4_MROUTE | RTMGRP_IPV6_MROUTE);
+            setsockopt(rthNeigh.fd, SOL_SOCKET, SO_RCVBUFFORCE, &nl_buffersize, sizeof(nl_buffersize));
+            RTPolling = boost::thread(&rtnl_listen, &rth, &RTPollingCb, this);
+            break;
+        }
+        case RS_FPM: {
+            FPMServer *fpm = new FPMServer(this);
+            RTPolling = boost::thread(*fpm);
+            syslog(LOG_NOTICE, "FPM interface enabled");
+            break;
+        }
+        default: {
+            syslog(LOG_CRIT, "Invalid route source specified. Disabling route updates.");
+            break;
+        }
     }
 
     GWResolver = boost::thread(&FlowTable::GWResolverCb, this);
@@ -96,6 +96,10 @@ void FlowTable::interrupt() {
     HTPolling.interrupt();
     GWResolver.interrupt();
     RTPolling.interrupt();
+}
+
+void FlowTable::sendRm(RouteMod rm) {
+    this->rm_q->push(rm);
 }
 
 void FlowTable::GWResolverCb(FlowTable *ft) {
@@ -145,8 +149,8 @@ void FlowTable::GWResolverCb(FlowTable *ft) {
         }
 
         syslog(LOG_INFO,
-               "calling sendToHw with %s/%s via %s",
-               addr_str.c_str(), mask_str.c_str(), gw_str.c_str());
+               "calling sendToHw with type %d route %s/%s via %s",
+               pr.type, addr_str.c_str(), mask_str.c_str(), gw_str.c_str());
         if (ft->sendToHw(pr.type, pr.rentry) < 0) {
             syslog(LOG_WARNING, "An error occurred while pushing %s/%s\n",
                    addr_str.c_str(), mask_str.c_str());
@@ -366,6 +370,10 @@ int FlowTable::updateRouteTable(struct nlmsghdr *n) {
         return 0;
     }
 
+    if (getInterface(intf, "route", &rentry->interface) != 0) {
+        return 0;
+    }
+
     switch (rtmsg_ptr->rtm_family) {
     case AF_INET6:
         rentry->netmask = IPAddress(IPV6, rtmsg_ptr->rtm_dst_len);
@@ -378,10 +386,6 @@ int FlowTable::updateRouteTable(struct nlmsghdr *n) {
     if (rtmsg_ptr->rtm_dst_len == 0) {
         /* Default route. Zero the address. */
         rentry->address = rentry->netmask;
-    }
-
-    if (getInterface(intf, "route", &rentry->interface) != 0) {
-        return 0;
     }
 
     string net = rentry->address.toString();
@@ -590,6 +594,12 @@ int FlowTable::sendToHw(RouteModType mod, const IPAddress& addr,
 
     rm.set_mod(mod);
     rm.set_id(FlowTable::vm_id);
+
+    if (local_iface.vlan) {
+        // rm.add_match(Match(RFMT_VLAN, local_iface.vlan));
+        rm.add_action(Action(RFAT_SET_VLAN_ID, local_iface.vlan));
+    }
+
     const string gw_str = gateway.toString();
 
     if (setEthernet(rm, local_iface, gateway) != 0) {
@@ -603,12 +613,13 @@ int FlowTable::sendToHw(RouteModType mod, const IPAddress& addr,
 
     /* Add the output port. Even if we're removing the route, RFServer requires
      * the port to determine which datapath to send to. */
-    rm.add_action(Action(RFAT_OUTPUT, local_iface.port));
+    // rm.add_action(Action(RFAT_OUTPUT, local_iface.port));
+    rm.set_vm_port(local_iface.port);
 
     syslog(LOG_INFO, "sending rfserver IPC for %s/%s via %s on port %u",
                      addr.toString().c_str(), mask.toString().c_str(),
                      gw_str.c_str(), local_iface.port);
-    this->ipc->send(RFCLIENT_RFSERVER_CHANNEL, RFSERVER_ID, rm);
+    this->sendRm(rm);
     return 0;
 }
 
@@ -680,9 +691,9 @@ void FlowTable::updateNHLFE(nhlfe_msg_t *nhlfe_msg) {
         return;
     }
 
-    msg.add_action(Action(RFAT_OUTPUT, iface.port));
+    // msg.add_action(Action(RFAT_OUTPUT, iface.port));
+    msg.set_vm_port(iface.port);
 
-    this->ipc->send(RFCLIENT_RFSERVER_CHANNEL, RFSERVER_ID, msg);
-
+    this->sendRm(msg);
     return;
 }

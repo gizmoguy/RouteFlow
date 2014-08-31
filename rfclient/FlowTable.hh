@@ -24,6 +24,8 @@
 
 using namespace std;
 
+const int nl_buffersize = 16 * 1024 * 1024;
+
 typedef enum route_source {
     RS_NETLINK,
     RS_FPM,
@@ -31,8 +33,7 @@ typedef enum route_source {
 
 class FlowTable {
     public:
-        FlowTable(uint64_t vm_id, InterfaceMap*, IPCMessageService*,
-                  RouteSource src);
+        FlowTable(uint64_t vm_id, InterfaceMap *ifMap, SyncQueue<RouteMod> *rm_q, RouteSource src);
         FlowTable(const FlowTable&);
 
         static void GWResolverCb(FlowTable *ft);
@@ -42,6 +43,7 @@ class FlowTable {
         void interrupt();
         void print_test();
 
+        void sendRm(RouteMod rm);
         int updateHostTable(struct nlmsghdr*);
         int updateRouteTable(struct nlmsghdr*);
         void updateNHLFE(nhlfe_msg_t *nhlfe_msg);
@@ -50,7 +52,7 @@ class FlowTable {
     private:
         RouteSource source;
         InterfaceMap* ifMap;
-        IPCMessageService* ipc;
+        SyncQueue<RouteMod> *rm_q;
         uint64_t vm_id;
 
         boost::thread GWResolver;
