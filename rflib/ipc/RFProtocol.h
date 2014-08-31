@@ -182,7 +182,8 @@ class DataPlaneMap : public IPCMessage {
 class RouteMod : public IPCMessage {
     public:
         RouteMod();
-        RouteMod(uint8_t mod, uint64_t id, uint64_t table, std::vector<Match> matches, std::vector<Action> actions, std::vector<Option> options);
+        RouteMod(uint8_t mod, uint64_t id, uint64_t vm_port, uint64_t table, uint64_t group,
+                 std::vector<Match> matches, std::vector<Action> actions, std::vector<Option> options);
 
         uint8_t get_mod();
         void set_mod(uint8_t mod);
@@ -190,8 +191,14 @@ class RouteMod : public IPCMessage {
         uint64_t get_id();
         void set_id(uint64_t id);
 
+        uint64_t get_vm_port();
+        void set_vm_port(uint64_t vm_port);
+
         uint64_t get_table();
         void set_table(uint64_t table);
+
+        uint64_t get_group();
+        void set_group(uint64_t group);
 
         std::vector<Match> get_matches();
         void set_matches(std::vector<Match> matches);
@@ -213,7 +220,9 @@ class RouteMod : public IPCMessage {
     private:
         uint8_t mod;
         uint64_t id;
+        uint64_t vm_port;
         uint64_t table;
+        uint64_t group;
         std::vector<Match> matches;
         std::vector<Action> actions;
         std::vector<Option> options;

@@ -32,8 +32,6 @@ ETH_PAYLOAD_MAX = 1500
 ETH_TOTAL_MAX = (ETH_HEADER_LEN + ETH_PAYLOAD_MAX + ETH_CRC_LEN)
 RF_MAX_PACKET_SIZE = (VLAN_HEADER_LEN + ETH_TOTAL_MAX)
 
-MATCH_L2 = True
-
 DC_DROP_ALL = 0			# Drop all incoming packets
 DC_CLEAR_FLOW_TABLE = 1 # Clear flow table
 DC_VM_INFO = 2			# Flow to communicate two linked VMs
@@ -53,12 +51,16 @@ DC_ALL = 255			# Send all traffic to the controller
 
 RMT_ADD = 0			# Add flow to datapath
 RMT_DELETE = 1			# Remove flow from datapath
-RMT_CONTROLLER = 2		# Flow output should be to datapath's controller
+RMT_CONTROLLER = 2	        # Add flow to datapath, output to datapath's controller
+RMT_ADD_GROUP = 3		# Add group to datapath
+RMT_DELETE_GROUP = 4		# Delete group from datapath
+#RMT_MODIFY = 99                # Modify existing flow (Unimplemented)
 
 # Port Configuration Types
 PCT_MAP_REQUEST = 0     # (deprecated) Request for a mapping packet.
 PCT_RESET = 1           # Reset the client port to inactive.
 PCT_MAP_SUCCESS = 2     # Mapping was successful; port can be brought up.
+PCT_ROUTEMOD_ACK = 3
 
 PC_MAP = 0
 PC_RESET = 1
@@ -92,3 +94,5 @@ PRIORITY_LOWEST = 0x0000
 PRIORITY_LOW = 0x4010
 PRIORITY_HIGH = 0x8020
 PRIORITY_HIGHEST = 0xC030
+
+CONTROLLER_GROUP = 1
