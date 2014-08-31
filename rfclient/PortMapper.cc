@@ -29,7 +29,10 @@ void PortMapper::operator()() {
             boost::lock_guard<boost::mutex> lock(*(this->ifMutex));
             map<int, Interface*>::iterator it;
             for (it = this->ifaces->begin(); it != this->ifaces->end(); it++) {
-                this->send_port_map(*(it->second));
+                Interface &iface = *(it->second);
+                if (iface.physical) {
+                    this->send_port_map(iface);
+                }
             }
         }
 
@@ -43,11 +46,11 @@ void PortMapper::operator()() {
  */
 void PortMapper::send_port_map(Interface &iface) {
     if (send_packet(iface.name.c_str(), iface.port) == -1)
-        syslog(LOG_NOTICE, "Error sending mapping packet (vm_port=%d)",
-               iface.port);
+        syslog(LOG_NOTICE, "Error sending mapping packet via %s",
+               iface.name.c_str());
     else
-        syslog(LOG_DEBUG, "Mapping packet was sent to RFVS (vm_port=%d)",
-               iface.port);
+        syslog(LOG_DEBUG, "Mapping packet was sent to RFVS via %s",
+               iface.name.c_str());
 }
 
 /**
