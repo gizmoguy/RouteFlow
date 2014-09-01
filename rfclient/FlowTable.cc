@@ -180,7 +180,7 @@ void FlowTable::GWResolverCb(FlowTable *ft) {
             }
         }
         for (it = resolvedRoutes.begin(); it != resolvedRoutes.end(); ++it) {
-            resolvedRoutes.erase(*it);    
+            ft->unresolvedRoutes.erase(*it);    
         }
     }
 }
