@@ -159,10 +159,16 @@ class SatelliteRouteModTranslator(DefaultRouteModTranslator):
         return rms
 
 
-class MultitableRouteModTranslator(RouteModTranslator):
+class NoviFlowMultitableRouteModTranslator(RouteModTranslator):
+    # NoviFlow as of Aug 2014 doesn't handle flow add operations
+    # in unsorted priority order well (very slow). For the moment
+    # make all flows in a table same priority.
 
     FIB_TABLE = 2
     ETHER_TABLE = 1
+
+    def __init__(self, dp_id, ct_id, rftable, isltable):
+        super(NoviFlowMultitableRouteModTranslator, self).__init__(dp_id, ct_id, rftable, isltable)
 
     def _send_rm_with_matches(self, rm, out_port, entries):
         rms = []
@@ -220,7 +226,7 @@ class MultitableRouteModTranslator(RouteModTranslator):
     def handle_controller_route_mod(self, entry, rm):
         rms = []
         rm.add_action(Action.GROUP(CONTROLLER_GROUP))
-        # should be FIB
+        # should be FIB_TABLE, but see NoviFlow note.
         rm.set_table(self.ETHER_TABLE)
         dl_dst = None
         orig_matches = rm.get_matches()
@@ -256,7 +262,7 @@ class MultitableRouteModTranslator(RouteModTranslator):
         rm.add_action(Action.OUTPUT(entry.dp_port))
 
         rm.set_table(self.FIB_TABLE)
-        # NF workaround - flatten priorities in FIB table
+        # See NoviFlow note
         rm.set_options(None)
         rm.add_option(Option.PRIORITY(PRIORITY_HIGH))
 
@@ -265,8 +271,9 @@ class MultitableRouteModTranslator(RouteModTranslator):
 
     def handle_isl_route_mod(self, r, rm):
         rms = []
+        # See NoviFlow note
         rm.set_options(None)
-        rm.add_option(self.DEFAULT_PRIORITY)
+        rm.add_option(Option.PRIORITY(PRIORITY_HIGH))
         rm.set_id(self.dp_id)
         rm.set_table(self.FIB_TABLE)
         rm.set_actions(None)
@@ -529,7 +536,7 @@ class RFServer(RFProtocolFactory, IPC.IPCMessageProcessor):
                 if dp_id not in self.route_mod_translator:
                     self.log.info("Configuring datapath (dp_id=%s)" % format_id(dp_id))
                     if dp_id in self.multitabledps:
-                        self.route_mod_translator[dp_id] = MultitableRouteModTranslator(
+                        self.route_mod_translator[dp_id] = NoviFlowMultitableRouteModTranslator(
                             dp_id, ct_id, self.rftable, self.isltable)
                     elif dp_id in self.satellitedps:
                         self.route_mod_translator[dp_id] = SatelliteRouteModTranslator(
