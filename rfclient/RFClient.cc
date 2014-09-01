@@ -271,7 +271,7 @@ bool RFClient::process(const string &, const string &, const string &,
                 sendAllInterfaceToControllerRouteMods(vm_port);
                 break;
             case PCT_ROUTEMOD_ACK:
-                syslog(LOG_INFO, "Got RouteMod ack (vm_port=%d)", vm_port);
+                syslog(LOG_DEBUG, "Got RouteMod ack (vm_port=%d)", vm_port);
                 this->rm_outstanding.unlock();
                 break;
             default:

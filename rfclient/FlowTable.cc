@@ -164,6 +164,9 @@ void FlowTable::GWResolverCb(FlowTable *ft) {
         set<string>::iterator it;
         for (it = ft->unresolvedRoutes.begin(); it != ft->unresolvedRoutes.end(); ++it) {
             const RouteEntry& re = ft->routeTable[*it];
+            const string addr_str = re.address.toString();
+            const string mask_str = re.netmask.toString();
+            const string gw_str = re.gateway.toString();
             if (ft->findHost(re.gateway) == MAC_ADDR_NONE) {
                 syslog(LOG_DEBUG,
                        "Still cannot resolve gateway %s, will retry route %s/%s",
