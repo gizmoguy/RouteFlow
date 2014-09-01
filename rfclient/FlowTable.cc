@@ -107,14 +107,6 @@ void FlowTable::GWResolverCb(FlowTable *ft) {
         PendingRoute pr;
         ft->pendingRoutes.wait_and_pop(pr);
 
-        /* If the head of the list is in no hurry to be resolved,
-         * then let's just sleep for a while until it's ready. */
-        if (boost::get_system_time() < pr.time) {
-            syslog(LOG_DEBUG, "GWResolver is getting sleepy... ");
-            boost::this_thread::sleep(pr.time);
-        }
-        pr.advance(ROUTE_COOLDOWN);
-
         const RouteEntry& re = pr.rentry;
         const string re_key = re.toString();
         const string addr_str = re.address.toString();
@@ -122,56 +114,70 @@ void FlowTable::GWResolverCb(FlowTable *ft) {
         const string gw_str = re.gateway.toString();
         bool existingEntry = ft->routeTable.count(re_key) > 0;
 
-        if (pr.type == RMT_ADD && existingEntry) {
-            syslog(LOG_INFO,
-                   "Received duplicate route add for route %s\n",
-                   addr_str.c_str());
-            continue;
-        }
-
-        if (pr.type == RMT_DELETE && !existingEntry) {
-            syslog(LOG_INFO,
-                   "Received route removal for %s but cannot be found\n",
-                   addr_str.c_str());
-            continue;
-        }
-
-        if (pr.type == RMT_ADD) {
-            if (ft->findHost(re.gateway) == MAC_ADDR_NONE) {
-                if (ft->resolveGateway(re.gateway, re.interface) < 0) {
-                    syslog(LOG_WARNING,
-                           "An error occurred while attempting to resolve %s/%s.\n",
-                            addr_str.c_str(), mask_str.c_str());
-                }
-                ft->pendingRoutes.push(pr);
-                continue;
-            }
-        }
-
-        syslog(LOG_INFO,
-               "calling sendToHw with type %d route %s/%s via %s",
-               pr.type, addr_str.c_str(), mask_str.c_str(), gw_str.c_str());
-        if (ft->sendToHw(pr.type, pr.rentry) < 0) {
-            syslog(LOG_WARNING, "An error occurred while pushing %s/%s\n",
-                   addr_str.c_str(), mask_str.c_str());
-            ft->pendingRoutes.push(pr);
-            continue;
-        }
-
         switch (pr.type) {
             case RMT_ADD:
-                ft->routeTable.insert(make_pair(re_key, re));
+                if (existingEntry) {
+                    syslog(LOG_ERR,
+                           "Received duplicate route add for %s",
+                           addr_str.c_str());
+                } else {
+                    ft->routeTable.insert(make_pair(re_key, re));
+                    if (ft->findHost(re.gateway) == MAC_ADDR_NONE) {
+                        syslog(LOG_ERR,
+                               "Cannot resolve gateway %s, will retry route %s/%s",
+                                gw_str.c_str(), addr_str.c_str(), mask_str.c_str());
+                        ft->unresolvedRoutes.insert(re_key);
+                    } else {
+                        syslog(LOG_INFO,
+                               "Adding route %s/%s via %s",
+                               addr_str.c_str(), mask_str.c_str(), gw_str.c_str());
+                        ft->sendToHw(pr.type, pr.rentry);
+                    }
+                }
                 break;
 
             case RMT_DELETE:
-                ft->routeTable.erase(re_key);
+                if (existingEntry) {
+                    ft->routeTable.erase(re_key);
+                    ft->unresolvedRoutes.erase(re_key);
+                    syslog(LOG_INFO,
+                           "Deleting route %s/%s via %s",
+                           addr_str.c_str(), mask_str.c_str(), gw_str.c_str());
+                    ft->sendToHw(pr.type, pr.rentry);
+                          
+                } else {
+                    syslog(LOG_ERR,
+                           "Received route removal for %s but not in routing table",
+                           addr_str.c_str());
+                }
                 break;
 
             default:
                 syslog(LOG_ERR,
-                       "Received unexpected RouteModType (%d)\n",
+                       "Received unexpected RouteModType (%d)",
                        pr.type);
-                continue;
+                break;
+        }
+
+        /* Any time we get a routing update, aggressively try to send any unresolved routes. */
+        set<string> resolvedRoutes;
+        set<string>::iterator it;
+        for (it = ft->unresolvedRoutes.begin(); it != ft->unresolvedRoutes.end(); ++it) {
+            const RouteEntry& re = ft->routeTable[*it];
+            if (ft->findHost(re.gateway) == MAC_ADDR_NONE) {
+                syslog(LOG_DEBUG,
+                       "Still cannot resolve gateway %s, will retry route %s/%s",
+                       gw_str.c_str(), addr_str.c_str(), mask_str.c_str());
+            } else {
+                syslog(LOG_INFO,
+                       "Adding previously unresolved route %s/%s via %s",
+                       addr_str.c_str(), mask_str.c_str(), gw_str.c_str());
+                ft->sendToHw(RMT_ADD, re);
+                resolvedRoutes.insert(*it);
+            }
+        }
+        for (it = resolvedRoutes.begin(); it != resolvedRoutes.end(); ++it) {
+            resolvedRoutes.erase(*it);    
         }
     }
 }
@@ -263,19 +269,20 @@ int FlowTable::updateHostTable(struct nlmsghdr *n) {
         }
     }
 
-    hentry->hwaddress = MACAddress(mac);
     if (getInterface(intf, "host", &hentry->interface) != 0) {
         return 0;
     }
 
+    const string host = hentry->address.toString();
+    hentry->hwaddress = MACAddress(mac);
+
     if (strlen(mac) == 0) {
-        syslog(LOG_INFO, "Received host entry with blank mac. Ignoring\n");
+        syslog(LOG_DEBUG, "Received host entry ip=%s with blank mac. Ignoring", host.c_str());
         return 0;
     }
 
     switch (n->nlmsg_type) {
         case RTM_NEWNEIGH: {
-            string host = hentry->address.toString();
             syslog(LOG_INFO, "netlink->RTM_NEWNEIGH: ip=%s, mac=%s",
                    host.c_str(), mac);
             this->sendToHw(RMT_ADD, *hentry);
@@ -396,6 +403,10 @@ int FlowTable::updateRouteTable(struct nlmsghdr *n) {
         case RTM_NEWROUTE:
             syslog(LOG_INFO, "netlink->RTM_NEWROUTE: net=%s, mask=%s, gw=%s",
                    net.c_str(), mask.c_str(), gw.c_str());
+            if (this->findHost(rentry->gateway) == MAC_ADDR_NONE) {
+                syslog(LOG_INFO, "need to resolve gateway %s", gw.c_str());
+                this->resolveGateway(rentry->gateway, rentry->interface);
+            }
             this->pendingRoutes.push(PendingRoute(RMT_ADD, *rentry));
             break;
         case RTM_DELROUTE: {

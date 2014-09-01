@@ -3,6 +3,7 @@
 
 #include <list>
 #include <map>
+#include <set>
 #include <stdint.h>
 #include <boost/thread.hpp>
 #include "libnetlink.hh"
@@ -33,7 +34,10 @@ typedef enum route_source {
 
 class FlowTable {
     public:
-        FlowTable(uint64_t vm_id, InterfaceMap *ifMap, SyncQueue<RouteMod> *rm_q, RouteSource src);
+        FlowTable(uint64_t vm_id,
+                  InterfaceMap *ifMap,
+                  SyncQueue<RouteMod> *rm_q,
+                  RouteSource src);
         FlowTable(const FlowTable&);
 
         static void GWResolverCb(FlowTable *ft);
@@ -72,6 +76,9 @@ class FlowTable {
 
         /* Routing table. */
         map<string, RouteEntry> routeTable;
+
+        /* Routes with unresolved nexthops */
+        set<string> unresolvedRoutes;
 
         /* Cached neighbour discovery sockets */
         map<string, int> pendingNeighbours;
