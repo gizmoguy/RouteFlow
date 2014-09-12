@@ -25,7 +25,7 @@
 
 using namespace std;
 
-const int nl_buffersize = 16 * 1024 * 1024;
+const int nl_buffersize = 128 * 1024 * 1024;
 
 typedef enum route_source {
     RS_NETLINK,

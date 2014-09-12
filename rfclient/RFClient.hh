@@ -11,6 +11,8 @@
 #include "FlowTable.hh"
 #include "PortMapper.hh"
 
+const int max_rm_outstanding = 5;
+
 class RFClient : private RFProtocolFactory, private IPCMessageProcessor,
                  public InterfaceMap {
     public:
@@ -22,7 +24,8 @@ class RFClient : private RFProtocolFactory, private IPCMessageProcessor,
         PortMapper* portMapper;
         IPCMessageService* ipc;
         SyncQueue<RouteMod> rm_q;
-        boost::mutex rm_outstanding;
+        boost::mutex rm_outstanding_mutex;
+        uint64_t rm_outstanding;
         uint64_t id;
 
         boost::mutex ifMutex; /* This guards both of the maps below. */

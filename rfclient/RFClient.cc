@@ -104,6 +104,7 @@ bool RFClient::findInterface(const char *ifName, Interface *dst) {
 }
 
 RFClient::RFClient(uint64_t id, const string &address, RouteSource source) {
+    this->rm_outstanding = 0;
     this->id = id;
 
     string id_str = to_string<uint64_t>(id);
@@ -138,10 +139,24 @@ RFClient::RFClient(uint64_t id, const string &address, RouteSource source) {
     ipc->listen(RFCLIENT_RFSERVER_CHANNEL, this, this, false);
 
     for (;;) {
+       bool flow_control = false;
+       {
+          boost::lock_guard<boost::mutex> lock(this->rm_outstanding_mutex);
+          if (this->rm_outstanding > max_rm_outstanding) {
+            flow_control = true;
+          }
+       }
+       if (flow_control) {
+          usleep(100);
+          continue;
+       }
        RouteMod rm;
        this->rm_q.wait_and_pop(rm);
-       this->rm_outstanding.lock();
        this->ipc->send(RFCLIENT_RFSERVER_CHANNEL, RFSERVER_ID, rm);
+       {
+          boost::lock_guard<boost::mutex> lock(this->rm_outstanding_mutex);
+          ++(this->rm_outstanding);
+       }
     }
 }
 
@@ -272,7 +287,10 @@ bool RFClient::process(const string &, const string &, const string &,
                 break;
             case PCT_ROUTEMOD_ACK:
                 syslog(LOG_DEBUG, "Got RouteMod ack (vm_port=%d)", vm_port);
-                this->rm_outstanding.unlock();
+                {
+                    boost::lock_guard<boost::mutex> lock(this->rm_outstanding_mutex);
+                    --(this->rm_outstanding);
+                }
                 break;
             default:
                 syslog(LOG_WARNING, "Received unrecognised PortConfig message");
