@@ -38,7 +38,7 @@ class RouteModTranslator(object):
 
     DROP_PRIORITY = Option.PRIORITY(PRIORITY_LOWEST + PRIORITY_BAND)
     CONTROLLER_PRIORITY = Option.PRIORITY(PRIORITY_HIGH)
-    DEFAULT_PRIORITY = Option.PRIORITY(PRIORITY_LOWEST + PRIORITY_BAND + 1)
+    DEFAULT_PRIORITY = Option.PRIORITY(PRIORITY_LOWEST + PRIORITY_BAND + 1000)
 
     def __init__(self, dp_id, ct_id, rftable, isltable):
         self.dp_id = dp_id
