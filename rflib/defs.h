@@ -20,6 +20,7 @@
 #define IS_RFVS(dp_id) !((dp_id >> 32) ^ RFVS_PREFIX)
 
 #define RF_ETH_PROTO 0x0A0A /* RF ethernet protocol */
+#define ETHERTYPE_ARP 0x0806
 
 #define VLAN_HEADER_LEN 4
 #define ETH_HEADER_LEN 14

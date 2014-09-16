@@ -133,7 +133,7 @@ class SatelliteRouteModTranslator(DefaultRouteModTranslator):
     def __init__(self, dp_id, ct_id, rftable, isltable):
         super(SatelliteRouteModTranslator, self).__init__(
             dp_id, ct_id, rftable, isltable)
-        self.sent_isl_flows = set()
+        self.sent_isl_dl = set()
 
     def handle_isl_route_mod(self, r, rm):
         rms = []
@@ -142,8 +142,8 @@ class SatelliteRouteModTranslator(DefaultRouteModTranslator):
             rm.add_match(Match.ETHERTYPE(ethertype))
             rm.set_options(None)
             rm.add_option(self.DEFAULT_PRIORITY)
-            if rm not in self.sent_isl_flows:
-                self.sent_isl_flows.add(rm)
+            if r.rem_eth_addr not in self.sent_isl_dl:
+                self.sent_isl_dl.add(r.rem_eth_addr)
                 rm.set_id(self.dp_id)
                 rm.set_table(0)
                 rm.set_actions(None)

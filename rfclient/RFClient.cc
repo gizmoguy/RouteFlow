@@ -206,18 +206,21 @@ void RFClient::sendInterfaceToControllerRouteMods(const Interface &iface) {
     for (it = iface.addresses.begin();
          it != iface.addresses.end();
          ++it) {
-         /* ICMP traffic. */
          if (it->getVersion() == IPV4) {
+             /* ICMP traffic. */
              rm = controllerRouteMod(port, vlan, hwaddress, true, *it);
              rm.add_match(Match(RFMT_NW_PROTO, (uint16_t)IPPROTO_ICMP));
              sendRm(rm);
+             /* ARP */
+             rm = controllerRouteMod(port, vlan, hwaddress, false, *it);
+             rm.add_match(Match(RFMT_ETHERTYPE, (uint16_t)ETHERTYPE_ARP));
+             sendRm(rm);
          } else {
+             /* TODO: handle neighbor solicitation et al specifically, 
+                      like we do for IPv4 and ARP. */
              rm = controllerRouteMod(port, vlan, hwaddress, true, *it);
              rm.add_match(Match(RFMT_NW_PROTO, (uint16_t)IPPROTO_ICMPV6));
              sendRm(rm);
-             this->ipc->send(RFCLIENT_RFSERVER_CHANNEL, RFSERVER_ID, rm);
-             /* TODO: handle neighbor solicitation et al specifically, 
-                      like we do for IPv4 and ARP. */
              rm = controllerRouteMod(port, vlan, hwaddress, false, *it);
              rm.add_match(Match(RFMT_ETHERTYPE, (uint16_t)ETHERTYPE_IPV6));
              rm.add_match(Match(RFMT_NW_PROTO, (uint16_t)IPPROTO_ICMPV6));
