@@ -86,25 +86,31 @@ start_rfvm1() {
 }
 
 reset() {
-    init=$1;
+    init=$1
     if [ ! $init -eq 1 ]; then
-        echo_bold "-> Stopping child processes...";
+        echo_bold "-> Stopping child processes..."
         kill_process_tree 1 $$
     fi
 
-    echo_bold "-> Stopping and resetting LXC VMs...";
-    lxc-stop -n rfvm1 &> /dev/null;
+    echo_bold "-> Stopping and resetting LXC VMs..."
+    lxc-stop -n rfvm1 &> /dev/null
 
-    echo_bold "-> Stopping and resetting virtual network...";
-    sudo $VSCTL del-br $RFBR &> /dev/null;
-    sudo $VSCTL del-br $RFDP &> /dev/null;
-    sudo $VSCTL emer-reset &> /dev/null;
+    echo_bold "-> Stopping and resetting virtual network..."
+    sudo $VSCTL del-br $RFBR &> /dev/null
+    sudo $VSCTL del-br $RFDP &> /dev/null
+    sudo $VSCTL emer-reset &> /dev/null
 
-    echo_bold "-> Deleting ifstate data...";
-    rm $RFVM1/rootfs/var/run/network/ifstate;
+    echo_bold "-> Deleting old veths..."
+    for i in `seq 0 $DPPORTS` ; do
+      ip link set down rfvm1.$i &> /dev/null
+      ip link del rfvm1.$i &> /dev/null
+    done
 
-    echo_bold "-> Deleting data from previous runs...";
-    rm -rf $HOME/db;
+    echo_bold "-> Deleting ifstate data..."
+    rm $RFVM1/rootfs/var/run/network/ifstate &> /dev/null
+
+    echo_bold "-> Deleting data from previous runs..."
+    rm -rf $HOME/db
 }
 reset 1
 trap "reset 0; exit 0" INT
