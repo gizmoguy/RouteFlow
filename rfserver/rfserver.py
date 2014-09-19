@@ -299,6 +299,12 @@ class RFServer(RFProtocolFactory, IPC.IPCMessageProcessor):
             rm.add_option(Option.PRIORITY(PRIORITY_HIGH))
             if operation_id == DC_ARP:
                 rm.add_match(Match.ETHERTYPE(ETHERTYPE_ARP))
+            elif operation_id == DC_DHCP:
+                rm.add_match(Match.ETHERTYPE(ETHERTYPE_IP))
+                rm.add_match(Match.ETHERNET('ff:ff:ff:ff:ff:ff'))
+                rm.add_match(Match.NW_PROTO(IPPROTO_UDP))
+                rm.add_match(Match.TP_SRC(TPORT_DHCP_SRC))
+                rm.add_match(Match.TP_DST(TPORT_DHCP_DST))
             elif operation_id == DC_VM_INFO:
                 rm.add_match(Match.ETHERTYPE(RF_ETH_PROTO))
             rm.add_action(Action.CONTROLLER())
@@ -320,6 +326,7 @@ class RFServer(RFProtocolFactory, IPC.IPCMessageProcessor):
             # TODO: enforce order: clear should always be executed first
             self.send_datapath_config_message(ct_id, dp_id, DC_DROP_ALL)
             self.send_datapath_config_message(ct_id, dp_id, DC_ARP)
+            self.send_datapath_config_message(ct_id, dp_id, DC_DHCP)
             self.log.info("Configuring datapath (dp_id=%s)" % format_id(dp_id))
         return is_rfvs(dp_id)
 
