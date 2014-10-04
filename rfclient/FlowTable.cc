@@ -366,7 +366,15 @@ int FlowTable::updateRouteTable(struct nlmsghdr *n) {
         return 0;
     }
 
-    rentry->netmask = IPAddress(IPV4, rtmsg_ptr->rtm_dst_len);
+    switch (rtmsg_ptr->rtm_family) {
+    case AF_INET6:
+        rentry->netmask = IPAddress(IPV6, rtmsg_ptr->rtm_dst_len);
+        break;
+    default:
+        rentry->netmask = IPAddress(IPV4, rtmsg_ptr->rtm_dst_len);
+        break;
+    }
+
     if (rtmsg_ptr->rtm_dst_len == 0) {
         /* Default route. Zero the address. */
         rentry->address = rentry->netmask;
