@@ -136,7 +136,7 @@ void FlowTable::GWResolverCb(FlowTable *ft) {
                                 gw_str.c_str(), addr_str.c_str(), mask_str.c_str());
                         ft->unresolvedRoutes.insert(re_key);
                     } else {
-                        syslog(LOG_INFO,
+                        syslog(LOG_DEBUG,
                                "Adding route %s/%s via %s",
                                addr_str.c_str(), mask_str.c_str(), gw_str.c_str());
                         ft->sendToHw(pr.type, pr.rentry);
@@ -148,7 +148,7 @@ void FlowTable::GWResolverCb(FlowTable *ft) {
                 if (existingEntry) {
                     ft->routeTable.erase(re_key);
                     ft->unresolvedRoutes.erase(re_key);
-                    syslog(LOG_INFO,
+                    syslog(LOG_DEBUG,
                            "Deleting route %s/%s via %s",
                            addr_str.c_str(), mask_str.c_str(), gw_str.c_str());
                     ft->sendToHw(pr.type, pr.rentry);
@@ -180,7 +180,7 @@ void FlowTable::GWResolverCb(FlowTable *ft) {
                        "Still cannot resolve gateway %s, will retry route %s/%s",
                        gw_str.c_str(), addr_str.c_str(), mask_str.c_str());
             } else {
-                syslog(LOG_INFO,
+                syslog(LOG_DEBUG,
                        "Adding previously unresolved route %s/%s via %s",
                        addr_str.c_str(), mask_str.c_str(), gw_str.c_str());
                 ft->sendToHw(RMT_ADD, re);
@@ -294,7 +294,7 @@ int FlowTable::updateHostTable(struct nlmsghdr *n) {
 
     switch (n->nlmsg_type) {
         case RTM_NEWNEIGH: {
-            syslog(LOG_INFO, "netlink->RTM_NEWNEIGH: ip=%s, mac=%s",
+            syslog(LOG_DEBUG, "netlink->RTM_NEWNEIGH: ip=%s, mac=%s",
                    host.c_str(), mac);
             this->sendToHw(RMT_ADD, *hentry);
             {
@@ -412,16 +412,16 @@ int FlowTable::updateRouteTable(struct nlmsghdr *n) {
 
     switch (n->nlmsg_type) {
         case RTM_NEWROUTE:
-            syslog(LOG_INFO, "netlink->RTM_NEWROUTE: net=%s, mask=%s, gw=%s",
+            syslog(LOG_DEBUG, "netlink->RTM_NEWROUTE: net=%s, mask=%s, gw=%s",
                    net.c_str(), mask.c_str(), gw.c_str());
             if (this->findHost(rentry->gateway) == MAC_ADDR_NONE) {
-                syslog(LOG_INFO, "need to resolve gateway %s", gw.c_str());
+                syslog(LOG_DEBUG, "need to resolve gateway %s", gw.c_str());
                 this->resolveGateway(rentry->gateway, rentry->interface);
             }
             this->pendingRoutes.push(PendingRoute(RMT_ADD, *rentry));
             break;
         case RTM_DELROUTE: {
-            syslog(LOG_INFO, "netlink->RTM_DELROUTE: net=%s, mask=%s, gw=%s",
+            syslog(LOG_DEBUG, "netlink->RTM_DELROUTE: net=%s, mask=%s, gw=%s",
                    net.c_str(), mask.c_str(), gw.c_str());
             this->pendingRoutes.push(PendingRoute(RMT_DELETE, *rentry));
             break;
@@ -505,12 +505,12 @@ int FlowTable::resolveGateway(const IPAddress& gateway,
     // If we already initiated neighbour discovery for this gateway, return.
     boost::lock_guard<boost::mutex> lock(ndMutex);
     if (pendingNeighbours.find(gateway_str) != pendingNeighbours.end()) {
-        syslog(LOG_INFO, "already doing neighbour discovery for %s", gateway_str.c_str());
+        syslog(LOG_DEBUG, "already doing neighbour discovery for %s", gateway_str.c_str());
         return 0;
     }
 
     // Otherwise, we should go ahead and begin the process.
-    syslog(LOG_INFO, "starting neighbour discovery for %s", gateway_str.c_str());
+    syslog(LOG_DEBUG, "starting neighbour discovery for %s", gateway_str.c_str());
     int sock = initiateND(gateway_str.c_str());
     if (sock == -1) {
         return -1;
@@ -570,7 +570,7 @@ int FlowTable::sendToHw(RouteModType mod, const RouteEntry& re) {
     const string gateway_str = re.gateway.toString();
     const MACAddress& remoteMac = findHost(re.gateway);
     if (remoteMac == MAC_ADDR_NONE) {
-        syslog(LOG_INFO, "Cannot resolve %s", gateway_str.c_str());
+        syslog(LOG_ERR, "Cannot resolve %s", gateway_str.c_str());
         return -1;
     }
 
@@ -596,7 +596,7 @@ int FlowTable::sendToHw(RouteModType mod, const IPAddress& addr,
                          const IPAddress& mask, const Interface& local_iface,
                          const MACAddress& gateway) {
     if (!local_iface.active) {
-        syslog(LOG_INFO, "Cannot send RouteMod for down port %s\n", local_iface.name.c_str());
+        syslog(LOG_ERR, "Cannot send RouteMod for down port %s\n", local_iface.name.c_str());
         return -1;
     }
 
@@ -613,11 +613,11 @@ int FlowTable::sendToHw(RouteModType mod, const IPAddress& addr,
     const string gw_str = gateway.toString();
 
     if (setEthernet(rm, local_iface, gateway) != 0) {
-        syslog(LOG_INFO, "cannot setEthernet for %s", gw_str.c_str());
+        syslog(LOG_ERR, "cannot setEthernet for %s", gw_str.c_str());
         return -1;
     }
     if (setIP(rm, addr, mask) != 0) {
-        syslog(LOG_INFO, "cannot setIP for %s", gw_str.c_str());
+        syslog(LOG_ERR, "cannot setIP for %s", gw_str.c_str());
         return -1;
     }
 
@@ -626,9 +626,9 @@ int FlowTable::sendToHw(RouteModType mod, const IPAddress& addr,
     // rm.add_action(Action(RFAT_OUTPUT, local_iface.port));
     rm.set_vm_port(local_iface.port);
 
-    syslog(LOG_INFO, "sending rfserver IPC for %s/%s via %s on port %u",
-                     addr.toString().c_str(), mask.toString().c_str(),
-                     gw_str.c_str(), local_iface.port);
+    syslog(LOG_DEBUG, "sending rfserver IPC for %s/%s via %s on port %u",
+                      addr.toString().c_str(), mask.toString().c_str(),
+                      gw_str.c_str(), local_iface.port);
     this->sendRm(rm);
     return 0;
 }
