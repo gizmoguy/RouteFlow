@@ -30,7 +30,7 @@ void PortMapper::operator()() {
             map<int, Interface*>::iterator it;
             for (it = this->ifaces->begin(); it != this->ifaces->end(); it++) {
                 Interface &iface = *(it->second);
-                if (iface.physical) {
+                if (iface.physical && !iface.active) {
                     this->send_port_map(iface);
                 }
             }
