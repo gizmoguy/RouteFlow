@@ -414,18 +414,13 @@ int FlowTable::updateRouteTable(struct nlmsghdr *n) {
         case RTM_NEWROUTE:
             syslog(LOG_DEBUG, "netlink->RTM_NEWROUTE: net=%s, mask=%s, gw=%s",
                    net.c_str(), mask.c_str(), gw.c_str());
-            if (this->findHost(rentry->gateway) == MAC_ADDR_NONE) {
-                syslog(LOG_DEBUG, "need to resolve gateway %s", gw.c_str());
-                this->resolveGateway(rentry->gateway, rentry->interface);
-            }
             this->pendingRoutes.push(PendingRoute(RMT_ADD, *rentry));
             break;
-        case RTM_DELROUTE: {
+        case RTM_DELROUTE:
             syslog(LOG_DEBUG, "netlink->RTM_DELROUTE: net=%s, mask=%s, gw=%s",
                    net.c_str(), mask.c_str(), gw.c_str());
             this->pendingRoutes.push(PendingRoute(RMT_DELETE, *rentry));
             break;
-        }
     }
 
     return 0;
