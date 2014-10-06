@@ -13,6 +13,7 @@ enum ActionType {
     RFAT_SET_VLAN_ID = 7,   /* Set VLAN ID */
     RFAT_GROUP = 8,         /* Output group */
     RFAT_GOTO = 9,          /* Goto table */
+    RFAT_STRIP_VLAN_DEFERRED = 10, /* Strip outermost VLAN (defer in write instructions) */
     RFAT_DROP = 254,        /* Drop packet (Unimplemented) */
     RFAT_SFLOW = 255,       /* Generate SFlow messages (Unimplemented) */
 };
