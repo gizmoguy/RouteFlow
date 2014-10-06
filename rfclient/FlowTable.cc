@@ -533,12 +533,8 @@ const MACAddress& FlowTable::findHost(const IPAddress& host) {
 int FlowTable::setEthernet(RouteMod& rm, const Interface& local_iface,
                            const MACAddress& gateway) {
     /* RFServer adds the Ethernet match to the flow, so we don't need to. */
-    // rm.add_match(Match(RFMT_ETHERNET, local_iface.hwaddress));
-
-    if (rm.get_mod() != RMT_DELETE) {
-        rm.add_action(Action(RFAT_SET_ETH_SRC, local_iface.hwaddress));
-        rm.add_action(Action(RFAT_SET_ETH_DST, gateway));
-    }
+    rm.add_action(Action(RFAT_SET_ETH_SRC, local_iface.hwaddress));
+    rm.add_action(Action(RFAT_SET_ETH_DST, gateway));
 
     return 0;
 }
@@ -564,21 +560,13 @@ int FlowTable::setIP(RouteMod& rm, const IPAddress& addr,
 
 int FlowTable::sendToHw(RouteModType mod, const RouteEntry& re) {
     const string gateway_str = re.gateway.toString();
-    if (mod == RMT_DELETE) {
-        return sendToHw(mod, re.address, re.netmask, re.interface,
-                        MAC_ADDR_NONE);
-    } else if (mod == RMT_ADD) {
-        const MACAddress& remoteMac = findHost(re.gateway);
-        if (remoteMac == MAC_ADDR_NONE) {
-            syslog(LOG_INFO, "Cannot Resolve %s\n", gateway_str.c_str());
-            return -1;
-        }
-
-        return sendToHw(mod, re.address, re.netmask, re.interface, remoteMac);
+    const MACAddress& remoteMac = findHost(re.gateway);
+    if (remoteMac == MAC_ADDR_NONE) {
+        syslog(LOG_INFO, "Cannot resolve %s", gateway_str.c_str());
+        return -1;
     }
 
-    syslog(LOG_ERR, "Unhandled RouteModType (%d)\n", mod);
-    return -1;
+    return sendToHw(mod, re.address, re.netmask, re.interface, remoteMac);
 }
 
 int FlowTable::sendToHw(RouteModType mod, const HostEntry& he) {
