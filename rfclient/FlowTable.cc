@@ -113,61 +113,62 @@ void FlowTable::sendRm(RouteMod rm) {
 void FlowTable::GWResolverCb(FlowTable *ft) {
     while (true) {
         PendingRoute pr;
-        ft->pendingRoutes.wait_and_pop(pr);
+        while (ft->pendingRoutes.front(pr)) {
+            ft->pendingRoutes.pop();
 
-        const RouteEntry& re = pr.rentry;
-        const string re_key = re.toString();
-        const string addr_str = re.address.toString();
-        const string mask_str = re.netmask.toString();
-        const string gw_str = re.gateway.toString();
-        bool existingEntry = ft->routeTable.count(re_key) > 0;
+            const RouteEntry& re = pr.rentry;
+            const string re_key = re.toString();
+            const string addr_str = re.address.toString();
+            const string mask_str = re.netmask.toString();
+            const string gw_str = re.gateway.toString();
+            bool existingEntry = ft->routeTable.count(re_key) > 0;
 
-        switch (pr.type) {
-            case RMT_ADD:
-                if (existingEntry) {
-                    syslog(LOG_ERR,
-                           "Received duplicate route add for %s",
-                           addr_str.c_str());
-                } else {
-                    ft->routeTable.insert(make_pair(re_key, re));
-                    if (ft->findHost(re.gateway) == MAC_ADDR_NONE) {
+            switch (pr.type) {
+                case RMT_ADD:
+                    if (existingEntry) {
                         syslog(LOG_ERR,
-                               "Cannot resolve gateway %s, will retry route %s/%s",
-                                gw_str.c_str(), addr_str.c_str(), mask_str.c_str());
-                        ft->unresolvedRoutes.insert(re_key);
+                              "Received duplicate route add for %s",
+                              addr_str.c_str());
                     } else {
+                        ft->routeTable.insert(make_pair(re_key, re));
+                        if (ft->findHost(re.gateway) == MAC_ADDR_NONE) {
+                            syslog(LOG_ERR,
+                                   "Cannot resolve gateway %s, will retry route %s/%s",
+                                    gw_str.c_str(), addr_str.c_str(), mask_str.c_str());
+                            ft->unresolvedRoutes.insert(re_key);
+                        } else {
+                            syslog(LOG_DEBUG,
+                                  "Adding route %s/%s via %s",
+                                  addr_str.c_str(), mask_str.c_str(), gw_str.c_str());
+                            ft->sendToHw(pr.type, pr.rentry);
+                        }
+                    }
+                    break;
+
+                case RMT_DELETE:
+                    if (existingEntry) {
+                        ft->routeTable.erase(re_key);
+                        ft->unresolvedRoutes.erase(re_key);
                         syslog(LOG_DEBUG,
-                               "Adding route %s/%s via %s",
+                               "Deleting route %s/%s via %s",
                                addr_str.c_str(), mask_str.c_str(), gw_str.c_str());
                         ft->sendToHw(pr.type, pr.rentry);
-                    }
-                }
-                break;
-
-            case RMT_DELETE:
-                if (existingEntry) {
-                    ft->routeTable.erase(re_key);
-                    ft->unresolvedRoutes.erase(re_key);
-                    syslog(LOG_DEBUG,
-                           "Deleting route %s/%s via %s",
-                           addr_str.c_str(), mask_str.c_str(), gw_str.c_str());
-                    ft->sendToHw(pr.type, pr.rentry);
                           
-                } else {
-                    syslog(LOG_ERR,
-                           "Received route removal for %s but not in routing table",
-                           addr_str.c_str());
-                }
-                break;
+                    } else {
+                        syslog(LOG_ERR,
+                               "Received route removal for %s but not in routing table",
+                               addr_str.c_str());
+                    }
+                    break;
 
-            default:
-                syslog(LOG_ERR,
-                       "Received unexpected RouteModType (%d)",
-                       pr.type);
-                break;
+                default:
+                    syslog(LOG_ERR,
+                           "Received unexpected RouteModType (%d)",
+                           pr.type);
+                    break;
+            }
         }
 
-        /* Any time we get a routing update, aggressively try to send any unresolved routes. */
         set<string> resolvedRoutes;
         set<string>::iterator it;
         for (it = ft->unresolvedRoutes.begin(); it != ft->unresolvedRoutes.end(); ++it) {
@@ -179,6 +180,7 @@ void FlowTable::GWResolverCb(FlowTable *ft) {
                 syslog(LOG_DEBUG,
                        "Still cannot resolve gateway %s, will retry route %s/%s",
                        gw_str.c_str(), addr_str.c_str(), mask_str.c_str());
+                ft->resolveGateway(re.gateway, re.interface);
             } else {
                 syslog(LOG_DEBUG,
                        "Adding previously unresolved route %s/%s via %s",
@@ -190,6 +192,7 @@ void FlowTable::GWResolverCb(FlowTable *ft) {
         for (it = resolvedRoutes.begin(); it != resolvedRoutes.end(); ++it) {
             ft->unresolvedRoutes.erase(*it);    
         }
+        usleep(100);
     }
 }
 
