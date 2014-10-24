@@ -283,7 +283,7 @@ class NoviFlowMultitableRouteModTranslator(RouteModTranslator):
         rms.extend(self._send_rm_with_matches(rm, r.dp_port, entries))
         return rms
 
-class CorsaMultitableRouteModTranslator(MultitableRouteModTranslator):
+class CorsaMultitableRouteModTranslator(RouteModTranslator):
 
     DROP_PRIORITY = Option.PRIORITY(0)
     CONTROLLER_PRIORITY = Option.PRIORITY(255)
