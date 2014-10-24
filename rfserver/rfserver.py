@@ -34,6 +34,7 @@ REGISTER_IDLE = 0
 REGISTER_ASSOCIATED = 1
 REGISTER_ISL = 2
 
+
 class RouteModTranslator(object):
 
     DROP_PRIORITY = Option.PRIORITY(PRIORITY_LOWEST + PRIORITY_BAND)
@@ -299,7 +300,6 @@ class RFServer(RFProtocolFactory, IPC.IPCMessageProcessor):
         self.rftable = RFTable()
         self.isltable = RFISLTable()
 
-        self.sent_flows = set()
         self.route_mod_translator = {}
 
         # Logging
@@ -372,6 +372,7 @@ class RFServer(RFProtocolFactory, IPC.IPCMessageProcessor):
     def acknowledge_route_mod(self, ct_id, vm_id, vm_port):
         self.ipc.send(RFCLIENT_RFSERVER_CHANNEL, str(vm_id),
                       PortConfig(vm_id=vm_id, vm_port=vm_port, operation_id=PCT_ROUTEMOD_ACK))
+        return
 
     def send_route_mod(self, ct_id, rm):
         rm.add_option(Option.CT_ID(ct_id))
