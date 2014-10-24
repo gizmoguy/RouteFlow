@@ -283,6 +283,196 @@ class NoviFlowMultitableRouteModTranslator(RouteModTranslator):
         rms.extend(self._send_rm_with_matches(rm, r.dp_port, entries))
         return rms
 
+class CorsaMultitableRouteModTranslator(MultitableRouteModTranslator):
+
+    DROP_PRIORITY = Option.PRIORITY(0)
+    CONTROLLER_PRIORITY = Option.PRIORITY(255)
+    DEFAULT_PRIORITY = Option.PRIORITY(PRIORITY_LOWEST + PRIORITY_BAND + 1)
+
+    VLAN_MPLS_TABLE = 1
+    VLAN_TABLE = 2
+    MPLS_TABLE = 3 # not currently implemented
+    ETHER_TABLE = 4
+    COS_MAP_TABLE = 5
+    FIB_TABLE = 6
+    LOCAL_TABLE = 9
+
+    def __init__(self, dp_id, ct_id, rftable, isltable, log):
+        super(CorsaMultitableRouteModTranslator, self).__init__(
+            dp_id, ct_id, rftable, isltable, log)
+        self.last_groupid = CONTROLLER_GROUP
+        self.actions_to_groupid = {}
+
+    def configure_datapath(self):
+        rms = []
+
+        # delete all groups
+        rm = RouteMod(RMT_DELETE_GROUP, self.dp_id)
+        rms.append(rm)
+
+        # delete all flows
+        rm = RouteMod(RMT_DELETE, self.dp_id)
+        rms.append(rm)
+
+        # default drop
+        for table_id in (0, self.VLAN_MPLS_TABLE, self.VLAN_TABLE,
+                         self.ETHER_TABLE, self.FIB_TABLE):
+            rm = RouteMod(RMT_ADD, self.dp_id)
+            rm.set_table(table_id)
+            rm.add_option(self.DROP_PRIORITY)
+            rms.append(rm)
+
+        ## Table 0
+        rm = RouteMod(RMT_ADD, self.dp_id)
+        rm.add_match(Match.ETHERNET("ff:ff:ff:ff:ff:ff"))
+        rm.add_action(Action.GOTO(self.VLAN_MPLS_TABLE))
+        rm.add_option(self.CONTROLLER_PRIORITY)
+        rms.append(rm)
+
+        ## VLAN/MPLS table 1
+        rm = RouteMod(RMT_ADD, self.dp_id)
+        rm.set_table(self.VLAN_MPLS_TABLE)
+        rm.add_match(Match.ETHERTYPE(ETHERTYPE_IP))
+        rm.add_action(Action.GOTO(self.VLAN_TABLE))
+        rm.add_option(self.CONTROLLER_PRIORITY)
+        rms.append(rm)
+        rm = RouteMod(RMT_ADD, self.dp_id)
+        rm.set_table(self.VLAN_MPLS_TABLE)
+        rm.add_match(Match.ETHERTYPE(ETHERTYPE_ARP))
+        rm.add_action(Action.GOTO(self.VLAN_TABLE))
+        rm.add_option(self.CONTROLLER_PRIORITY)
+        rms.append(rm)
+        rm = RouteMod(RMT_ADD, self.dp_id)
+        rm.set_table(self.VLAN_MPLS_TABLE)
+        rm.add_match(Match.ETHERTYPE(0x8100))
+        rm.add_action(Action.GOTO(self.VLAN_TABLE))
+        rm.add_option(self.CONTROLLER_PRIORITY)
+        rms.append(rm)
+
+        ## VLAN table 2
+        # no default flows other than drop.
+
+        ## Ether type table 3
+        # ARP
+        rm = RouteMod(RMT_ADD, self.dp_id)
+        rm.set_table(self.ETHER_TABLE)
+        rm.add_match(Match.ETHERTYPE(ETHERTYPE_ARP))
+        rm.add_action(Action.CONTROLLER())
+        rm.add_option(self.CONTROLLER_PRIORITY)
+        rms.append(rm)
+        # IPv4
+        rm = RouteMod(RMT_ADD, self.dp_id)
+        rm.set_table(self.ETHER_TABLE)
+        rm.add_match(Match.ETHERTYPE(ETHERTYPE_IP))
+        rm.add_option(self.CONTROLLER_PRIORITY)
+        rm.add_action(Action.GOTO(self.COS_MAP_TABLE))
+        rms.append(rm)
+
+        # COS table 5 (just map to FIB table)
+        rm = RouteMod(RMT_ADD, self.dp_id)
+        rm.set_table(self.COS_MAP_TABLE)
+        rm.add_action(Action.GOTO(self.FIB_TABLE))
+        rm.add_option(self.DROP_PRIORITY)
+        rms.append(rm)
+
+        ## Local table temporary catch-all entry (table 9)
+        rm = RouteMod(RMT_ADD, self.dp_id)
+        rm.set_table(self.LOCAL_TABLE)
+        rm.add_action(Action.CONTROLLER())
+        rm.add_option(self.CONTROLLER_PRIORITY)
+        rms.append(rm)
+
+        return rms
+
+    def _send_rm_with_matches(self, rm, out_port, entries):
+        rms = []
+        for entry in entries:
+            if out_port != entry.dp_port:
+                if (entry.get_status() == RFENTRY_ACTIVE or
+                    entry.get_status() == RFISL_ACTIVE):
+                    dst_eth = None
+                    for action_dict in rm.actions:
+                        action = Action.from_dict(action_dict)
+                        action_type = action.type_to_str(action._type)
+                        if action_type == 'RFAT_SET_ETH_DST':
+                            dst_eth = action.get_value()
+                            break
+                    if dst_eth not in self.actions_to_groupid:
+                        self.last_groupid += 1
+                        new_groupid = self.last_groupid
+                        self.actions_to_groupid[dst_eth] = new_groupid
+                        group_rm = RouteMod(RMT_ADD_GROUP, self.dp_id)
+                        group_rm.set_group(new_groupid)
+                        group_rm.set_actions(rm.actions)
+                        rms.append(group_rm)
+                        self.log.info("adding new group %u for Ethernet destination %s" % (
+                            new_groupid, dst_eth))
+                    rm.set_actions(None)
+                    rm.add_action(Action.GROUP(self.actions_to_groupid[dst_eth]))
+                    rms.append(rm)
+                    break
+        return rms
+
+    def handle_controller_route_mod(self, entry, rm):
+        rms = []
+        rm.add_action(Action.GOTO(self.LOCAL_TABLE))
+        rm.set_table(self.FIB_TABLE)
+        dl_dst = None
+        dst_vlan = None
+        orig_matches = rm.get_matches()
+        rm.set_matches(None)
+        for match_dict in orig_matches:
+            match = Match.from_dict(match_dict)
+            match_type = match.type_to_str(match._type)
+            if match_type == "RFMT_ETHERNET":
+                dl_dst = match
+            # TODO: support more than IP address matches
+            # TODO: support more than IPv4
+            elif match_type == "RFMT_IPV4":
+                rm.add_match(Match.ETHERTYPE(ETHERTYPE_IP))
+                rm.add_match(match)
+            elif match_type == "RFMT_VLAN_ID":
+                dst_vlan = match.get_value()
+
+        if rm.matches:
+            rms.append(rm)
+
+        if dst_vlan is not None:
+            vlan_rm = RouteMod(RMT_ADD, self.dp_id)
+            vlan_rm.set_table(self.VLAN_TABLE)
+            vlan_rm.add_match(Match.IN_PORT(entry.dp_port))
+            vlan_rm.add_match(Match.VLAN_ID(dst_vlan))
+            vlan_rm.add_action(Action.RFAT_STRIP_VLAN_DEFERRED(self.VLAN_TABLE))
+            vlan_rm.add_action(Action.GOTO(self.ETHER_TABLE))
+            vlan_rm.add_option(self.CONTROLLER_PRIORITY)
+            self.log.info("adding new VLAN strip rule for VLAN %s" % (dst_vlan))
+            rms.append(vlan_rm)
+
+        if dl_dst is not None:
+            hw_rm = RouteMod(RMT_CONTROLLER, entry.dp_id)
+            hw_rm.set_id(rm.get_id())
+            hw_rm.set_vm_port(rm.get_vm_port())
+            hw_rm.add_match(dl_dst)
+            hw_rm.add_action(Action.GOTO(self.VLAN_MPLS_TABLE))
+            hw_rm.add_option(self.DEFAULT_PRIORITY)
+            rms.append(hw_rm)
+
+        return rms
+
+    def handle_route_mod(self, entry, rm):
+        rms = []
+        entries = self.rftable.get_entries(dp_id=entry.dp_id,
+                                           ct_id=entry.ct_id)
+        entries.extend(self.isltable.get_entries(dp_id=entry.dp_id,
+                                                 ct_id=entry.ct_id))
+
+        # Replace the VM port with the datapath port
+        rm.add_action(Action.OUTPUT(entry.dp_port))
+
+        rm.set_table(self.FIB_TABLE)
+
+        rms.extend(self._send_rm_with_matches(rm, entry.dp_port, entries))
+        return rms
 
 class RFServer(RFProtocolFactory, IPC.IPCMessageProcessor):
     def __init__(self, configfile, islconffile, multitabledps, satellitedps):
