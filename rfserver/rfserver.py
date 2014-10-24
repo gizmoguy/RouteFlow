@@ -442,7 +442,7 @@ class CorsaMultitableRouteModTranslator(RouteModTranslator):
             vlan_rm.set_table(self.VLAN_TABLE)
             vlan_rm.add_match(Match.IN_PORT(entry.dp_port))
             vlan_rm.add_match(Match.VLAN_ID(dst_vlan))
-            vlan_rm.add_action(Action.RFAT_STRIP_VLAN_DEFERRED(self.VLAN_TABLE))
+            vlan_rm.add_action(Action.STRIP_VLAN_DEFERRED(self.VLAN_TABLE))
             vlan_rm.add_action(Action.GOTO(self.ETHER_TABLE))
             vlan_rm.add_option(self.CONTROLLER_PRIORITY)
             self.log.info("adding new VLAN strip rule for VLAN %s" % (dst_vlan))
