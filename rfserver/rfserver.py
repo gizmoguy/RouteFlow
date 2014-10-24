@@ -41,11 +41,12 @@ class RouteModTranslator(object):
     CONTROLLER_PRIORITY = Option.PRIORITY(PRIORITY_HIGH)
     DEFAULT_PRIORITY = Option.PRIORITY(PRIORITY_LOWEST + PRIORITY_BAND + 1000)
 
-    def __init__(self, dp_id, ct_id, rftable, isltable):
+    def __init__(self, dp_id, ct_id, rftable, isltable, log):
         self.dp_id = dp_id
         self.ct_id = ct_id
         self.rftable = rftable
         self.isltable = isltable
+        self.log = log
 
     def configure_datapath(self):
         raise Exception
@@ -131,9 +132,9 @@ class DefaultRouteModTranslator(RouteModTranslator):
 
 class SatelliteRouteModTranslator(DefaultRouteModTranslator):
 
-    def __init__(self, dp_id, ct_id, rftable, isltable):
+    def __init__(self, dp_id, ct_id, rftable, isltable, log):
         super(SatelliteRouteModTranslator, self).__init__(
-            dp_id, ct_id, rftable, isltable)
+            dp_id, ct_id, rftable, isltable, log)
         self.sent_isl_dl = set()
 
     def handle_isl_route_mod(self, r, rm):
@@ -164,9 +165,9 @@ class NoviFlowMultitableRouteModTranslator(RouteModTranslator):
     FIB_TABLE = 2
     ETHER_TABLE = 1
 
-    def __init__(self, dp_id, ct_id, rftable, isltable):
+    def __init__(self, dp_id, ct_id, rftable, isltable, log):
         super(NoviFlowMultitableRouteModTranslator, self).__init__(
-            dp_id, ct_id, rftable, isltable)
+            dp_id, ct_id, rftable, isltable, log)
 
     def _send_rm_with_matches(self, rm, out_port, entries):
         rms = []
@@ -535,13 +536,13 @@ class RFServer(RFProtocolFactory, IPC.IPCMessageProcessor):
                     self.log.info("Configuring datapath (dp_id=%s)" % format_id(dp_id))
                     if dp_id in self.multitabledps:
                         self.route_mod_translator[dp_id] = NoviFlowMultitableRouteModTranslator(
-                            dp_id, ct_id, self.rftable, self.isltable)
+                            dp_id, ct_id, self.rftable, self.isltable, self.log)
                     elif dp_id in self.satellitedps:
                         self.route_mod_translator[dp_id] = SatelliteRouteModTranslator(
-                            dp_id, ct_id, self.rftable, self.isltable)
+                            dp_id, ct_id, self.rftable, self.isltable, self.log)
                     else:
                         self.route_mod_translator[dp_id] = DefaultRouteModTranslator(
-                            dp_id, ct_id, self.rftable, self.isltable)
+                            dp_id, ct_id, self.rftable, self.isltable, self.log)
                     self.send_datapath_config_messages(ct_id, dp_id) 
             return False
     # DatapathDown methods
