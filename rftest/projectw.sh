@@ -52,12 +52,16 @@ do
     --novms)
         MODE="NOVMS"
         ;;
+    --pingtest)
+        MODE="PINGTEST"
+        ;;
     *)
     echo "Invalid argument: $1"
     echo "Options: "
     echo "    --ryu: run using RYU"
     echo "    --reset: stop running and clear data from previous executions"
     echo "    --novms: start the controller but not the virtual network"
+    echo "    --pingtest: verify connectivity between hosts on the virtual network"
     exit
     ;;
     esac
@@ -147,6 +151,23 @@ start_sample_vms() {
     echo_bold "Login and run:"
     echo_bold "  $ ping $DPPORTNET.2.2"
     echo_bold "  $ ping $DPPORTNETV6:2:2"
+}
+
+start_ping_test() {
+    echo_bold "-> Testing connectivity between hosts on a virtual network"
+    cd rftest
+
+    if python pingtest.py; then
+        echo_bold "Tests successful"
+        reset 0
+        exit
+    else
+        echo_bold "Tests failed"
+        reset 0
+        exit
+    fi
+
+    cd - &> /dev/null
 }
 
 default_config() {
@@ -359,6 +380,9 @@ if [ "$ACTION" != "RESET" ]; then
     case "$MODE" in
     STARTBVMS)
       start_sample_vms
+      ;;
+    PINGTEST)
+      start_ping_test
       ;;
     esac
     echo_bold "You can stop this test by pressing Ctrl+C."
