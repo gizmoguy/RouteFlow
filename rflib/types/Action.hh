@@ -11,9 +11,10 @@ enum ActionType {
     RFAT_POP_MPLS = 5,      /* Pop MPLS label */
     RFAT_SWAP_MPLS = 6,     /* Swap MPLS label */
     RFAT_SET_VLAN_ID = 7,   /* Set VLAN ID */
-    RFAT_GROUP = 8,         /* Output group */
-    RFAT_GOTO = 9,          /* Goto table */
-    RFAT_STRIP_VLAN_DEFERRED = 10, /* Strip outermost VLAN (defer in write instructions) */
+    RFAT_STRIP_VLAN_DEFERRED = 8, /* Strip outermost VLAN (defer in write instructions) */
+    RFAT_SWAP_VLAN_ID = 9,  /* Swap VLAN ID */
+    RFAT_GROUP = 10,         /* Output group */
+    RFAT_GOTO = 11,          /* Goto table */
     RFAT_DROP = 254,        /* Drop packet (Unimplemented) */
     RFAT_SFLOW = 255,       /* Generate SFlow messages (Unimplemented) */
 };

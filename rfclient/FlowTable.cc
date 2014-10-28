@@ -605,7 +605,7 @@ int FlowTable::sendToHw(RouteModType mod, const IPAddress& addr,
 
     if (local_iface.vlan) {
         // rm.add_match(Match(RFMT_VLAN, local_iface.vlan));
-        rm.add_action(Action(RFAT_SET_VLAN_ID, local_iface.vlan));
+        rm.add_action(Action(RFAT_SWAP_VLAN_ID, local_iface.vlan));
     }
 
     const string gw_str = gateway.toString();
