@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Set to 0 to use external switch(es)
-STARTBVMS=1
+MODE="STARTBVMS"
 
 # If rfserverconfig.csv and rfserverinternal.csv exist in /home/projectw,
 # use them and don't try to configure rfvm1. If they do not exist, use values
@@ -39,22 +39,36 @@ if [ "$EUID" != "0" ]; then
   exit 1
 fi
 
-ACTION=""
-case "$1" in
---ryu)
-    ACTION="RYU"
-    ;;
---reset)
-    ACTION="RESET"
-    ;;
-*)
+for i in "$@"
+do
+    case $i in
+    --ryu)
+        ACTION="RYU"
+        echo "action is ryu"
+        ;;
+    --reset)
+        ACTION="RESET"
+        ;;
+    --novms)
+        MODE="NOVMS"
+        ;;
+    *)
     echo "Invalid argument: $1"
     echo "Options: "
     echo "    --ryu: run using RYU"
     echo "    --reset: stop running and clear data from previous executions"
+    echo "    --novms: start the controller but not the virtual network"
     exit
     ;;
-esac
+    esac
+done
+
+if [ -z "$ACTION" ]; then
+    echo "You must specify an action:"
+    echo "    --reset: stop running and clear data from previous executions"
+    echo "    --ryu: run using RYU"
+    exit
+fi
 
 cd $RF_HOME
 
@@ -342,9 +356,11 @@ if [ "$ACTION" != "RESET" ]; then
       sleep 1
     done
 
-    if [ $STARTBVMS -eq 1 ] ; then
+    case "$MODE" in
+    STARTBVMS)
       start_sample_vms
-    fi
+      ;;
+    esac
     echo_bold "You can stop this test by pressing Ctrl+C."
     wait
 fi
