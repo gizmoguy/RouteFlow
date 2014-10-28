@@ -88,7 +88,7 @@ class DefaultRouteModTranslator(RouteModTranslator):
 
         # default drop
         rm = RouteMod(RMT_ADD, self.dp_id)
-        rm.add_match(Match.ETHERTYPE(ETHERTYPE_IP))
+        #rm.add_match(Match.ETHERTYPE(ETHERTYPE_IP))
         rm.add_option(self.DROP_PRIORITY)
         rms.append(rm)
 
