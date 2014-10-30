@@ -15,6 +15,7 @@ RFDP=br-dp
 RF_DPID=7266767372667673
 RFSERVERCONF=/etc/routeflow/rfserverconfig.csv
 RFSERVERINTERNAL=/etc/routeflow/rfserverinternal.csv
+RFSERVERDPIDMODE=/etc/routeflow/rfserverdptypes.csv
 OVSSOCK=/var/run/openvswitch/db.sock
 VSCTL="ovs-vsctl --db=unix:$OVSSOCK"
 source /srv/openvapour/pythonenv/bin/activate
@@ -135,7 +136,26 @@ if [ "$ACTION" != "RESET" ]; then
     wait_port_listen $CONTROLLER_PORT
 
     echo_bold "-> Starting RFServer..."
-    ./rfserver/rfserver.py $RFSERVERCONF -i $RFSERVERINTERNAL &
+    # parse some config files
+    rf_args="$RFSERVERCONF -i $RFSERVERINTERNAL"
+
+    if [ -f $RFSERVERDPIDMODE ]; then
+        MULTITABLEDPS=$(tail -n +2 $RFSERVERDPIDMODE | \
+            grep multitable | sed s/,multitable// | sed -n -e 'H;${x;s/\n/,/g;s/^,//;p;}')
+        SATELLITEDPS=$(tail -n +2 $RFSERVERDPIDMODE | \
+            grep satellite | sed s/,satellite// | sed -n -e 'H;${x;s/\n/,/g;s/^,//;p;}')
+
+
+        if [ ! -z "$MULTITABLEDPS" ]; then
+            rf_args="$rf_args -m $MULTITABLEDPS"
+        fi
+
+        if [ ! -z "$SATELLITEDPS" ]; then
+            rf_args="$rf_args -s $SATELLITEDPS"
+        fi
+    fi
+
+    ./rfserver/rfserver.py $rf_args &
 
     echo_bold "-> Starting the control plane network ($RFDP VS)..."
     $VSCTL add-br $RFDP
