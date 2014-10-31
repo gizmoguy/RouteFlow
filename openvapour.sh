@@ -1,23 +1,21 @@
 #!/bin/bash
 
-HOSTVMIP=172.30.20.253/28
-DPPORTS=10
-WAND_DPID=0x99
-REANNZ_DPID=0x9a
-RFVM1_ID=12A0A0A0A0A0
-
 RF_HOME=/srv/openvapour/RouteFlow
 CONTROLLER_PORT=6633
 LXCDIR=/var/lib/lxc
 RFVM1=$LXCDIR/rfvm1
 RFBR=br-rf
 RFDP=br-dp
-RF_DPID=7266767372667673
+RFDPID=7266767372667673
+OFP=OpenFlow13
 RFSERVERCONF=/etc/routeflow/rfserverconfig.csv
 RFSERVERINTERNAL=/etc/routeflow/rfserverinternal.csv
 RFSERVERDPIDMODE=/etc/routeflow/rfserverdptypes.csv
+HOSTVMIP=172.30.20.253/28
+RFVM1IP=172.30.20.254
 OVSSOCK=/var/run/openvswitch/db.sock
 VSCTL="ovs-vsctl --db=unix:$OVSSOCK"
+OFCTL="ovs-ofctl -O$OFP"
 source /srv/openvapour/pythonenv/bin/activate
 export PATH=$PATH:/usr/local/bin:/usr/local/sbin
 export PYTHONPATH=$PYTHONPATH:$RF_HOME
@@ -77,6 +75,27 @@ kill_process_tree() {
     fi
 }
 
+add_local_br() {
+    br=$1
+    dpid=$2
+    $VSCTL add-br $br
+    $VSCTL set bridge $br protocols=$OFP
+    if [ "$dpid" != "" ] ; then
+      $VSCTL set bridge $br other-config:datapath-id=$dpid
+    fi
+    ip link set up $br
+    check_local_br_up $br
+}
+
+check_local_br_up() {
+    br=$1
+    echo waiting for OVS sw/controller $br to come up
+    while ! $OFCTL ping $br 64|grep -q "64 bytes from" ; do
+      echo -n "."
+      sleep 1
+    done
+}
+
 start_rfvm1() {
     echo_bold "-> Starting the rfvm_wand virtual machine..."
     ROOTFS=$RFVM1/rootfs
@@ -87,28 +106,26 @@ start_rfvm1() {
 }
 
 reset() {
+    echo_bold "-> Stopping and resetting LXC VMs..."
+    lxc-stop -n rfvm1 &> /dev/null
+
     init=$1
     if [ ! $init -eq 1 ]; then
         echo_bold "-> Stopping child processes..."
         kill_process_tree 1 $$
     fi
 
-    echo_bold "-> Stopping and resetting LXC VMs..."
-    lxc-stop -n rfvm1 &> /dev/null
-
-    echo_bold "-> Stopping and resetting virtual network..."
     sudo $VSCTL del-br $RFBR &> /dev/null
     sudo $VSCTL del-br $RFDP &> /dev/null
     sudo $VSCTL emer-reset &> /dev/null
 
-    echo_bold "-> Deleting old veths..."
-    for i in `seq 0 $DPPORTS` ; do
-      ip link set down rfvm1.$i &> /dev/null
-      ip link del rfvm1.$i &> /dev/null
-    done
-
-    echo_bold "-> Deleting ifstate data..."
     rm $RFVM1/rootfs/var/run/network/ifstate &> /dev/null
+
+    echo_bold "-> Deleting old veths..."
+    for i in `netstat -i|grep rfvm1|cut -f 1 -d " "` ; do
+      ip link set down $i &> /dev/null
+      ip link del $i &> /dev/null
+    done
 
     echo_bold "-> Deleting data from previous runs..."
     rm -rf $HOME/db
@@ -118,22 +135,8 @@ trap "reset 0; exit 0" INT
 
 if [ "$ACTION" != "RESET" ]; then
     echo_bold "-> Starting the management network ($RFBR)..."
-    $VSCTL add-br $RFBR
-    ip link set $RFBR up
+    add_local_br $RFBR
     ip address add $HOSTVMIP dev $RFBR
-    $VSCTL add-port $RFBR rfvm1.0
-    start_rfvm1
-    echo_bold "-> Configuring the virtual machines..."
-
-    echo_bold "-> Starting the controller ($ACTION) and RFPRoxy..."
-    case "$ACTION" in
-    RYU)
-        cd ryu-rfproxy
-        /srv/openvapour/pythonenv/bin/ryu-manager rfproxy.py &
-        ;;
-    esac
-    cd - &> /dev/null
-    wait_port_listen $CONTROLLER_PORT
 
     echo_bold "-> Starting RFServer..."
     # parse some config files
@@ -145,7 +148,6 @@ if [ "$ACTION" != "RESET" ]; then
         SATELLITEDPS=$(tail -n +2 $RFSERVERDPIDMODE | \
             grep satellite | sed s/,satellite// | sed -n -e 'H;${x;s/\n/,/g;s/^,//;p;}')
 
-
         if [ ! -z "$MULTITABLEDPS" ]; then
             rf_args="$rf_args -m $MULTITABLEDPS"
         fi
@@ -155,17 +157,53 @@ if [ "$ACTION" != "RESET" ]; then
         fi
     fi
 
-    ./rfserver/rfserver.py $rf_args &
+    nice ./rfserver/rfserver.py $rf_args &
+
+    echo_bold "-> Starting the controller ($ACTION) and RFPRoxy..."
+    case "$ACTION" in
+    RYU)
+        cd ryu-rfproxy
+        ryu-manager --use-stderr --ofp-tcp-listen-port=$CONTROLLER_PORT rfproxy.py &
+        ;;
+    esac
+    cd - &> /dev/null
+    wait_port_listen $CONTROLLER_PORT
+    check_local_br_up tcp:127.0.0.1:$CONTROLLER_PORT
 
     echo_bold "-> Starting the control plane network ($RFDP VS)..."
     $VSCTL add-br $RFDP
-    for i in `seq 1 $DPPORTS` ; do
-      $VSCTL add-port $RFDP rfvm1.$i
-    done
-    $VSCTL set bridge $RFDP other-config:datapath-id=$RF_DPID
-    $VSCTL set bridge $RFDP protocols=OpenFlow13
+    $VSCTL set bridge $RFDP other-config:datapath-id=$RFDPID
+    $VSCTL set bridge $RFDP protocols=$OFP
     $VSCTL set-controller $RFDP tcp:127.0.0.1:$CONTROLLER_PORT
-    ip link set $RFDP up
+    $OFCTL add-flow $RFDP actions=CONTROLLER:65509
+    ip link set up $RFDP
+    check_local_br_up $RFDP
+
+    echo_bold "-> Waiting for $RFDP to connect to controller..."
+    while ! $VSCTL find Controller target=\"tcp:127.0.0.1:$CONTROLLER_PORT\" is_connected=true | grep -q connected ; do
+      echo -n .
+      sleep 1
+    done
+
+    echo_bold "-> Starting rfvm1..."
+    start_rfvm1
+    while ! ifconfig -s rfvm1.0 ; do
+      echo -n .
+      sleep 1
+    done
+
+    $VSCTL add-port $RFBR rfvm1.0
+    for i in `netstat -i|grep rfvm1|cut -f 1 -d " "` ; do
+      if [ "$i" != "rfvm1.0" ] ; then
+        $VSCTL add-port $RFDP $i
+      fi
+    done
+
+    echo_bold "-> Waiting for rfvm1 to come up..."
+    while ! ping -W 1 -c 1 $RFVM1IP ; do
+      echo -n .
+      sleep 1
+    done
 
     echo_bold "You can stop this test by pressing Ctrl+C."
     wait
