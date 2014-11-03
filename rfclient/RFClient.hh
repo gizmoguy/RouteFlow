@@ -39,7 +39,8 @@ class RFClient : private RFProtocolFactory, private IPCMessageProcessor,
         bool process(const string &from, const string &to,
                      const string &channel, IPCMessage& msg);
         void sendRm(RouteMod rm);
-        RouteMod controllerRouteMod(uint32_t port, uint32_t vlan, MACAddress hwaddress, 
+        RouteMod controllerRouteMod(uint32_t port, uint32_t vlan,
+                                    bool matchMac, MACAddress hwaddress,
                                     bool matchIP, const IPAddress &ip_address);
         void sendInterfaceToControllerRouteMods(const Interface &iface);
         void sendAllInterfaceToControllerRouteMods(uint32_t vm_port);
