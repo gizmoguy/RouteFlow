@@ -219,7 +219,7 @@ void RFClient::sendInterfaceToControllerRouteMods(const Interface &iface) {
              rm.add_match(Match(RFMT_ETHERTYPE, (uint16_t)ETHERTYPE_ARP));
              sendRm(rm);
              /* DHCP */
-             rm = controllerRouteMod(port, vlan, hwaddress, false, *it);
+             rm = controllerRouteMod(port, vlan, false, hwaddress, false, *it);
              rm.add_match(Match(RFMT_ETHERTYPE, (uint16_t)ETHERTYPE_IP));
              rm.add_match(Match(RFMT_ETHERNET, MACAddress("FF:FF:FF:FF:FF:FF")));
              rm.add_match(Match(RFMT_NW_PROTO, (uint16_t)IPPROTO_UDP));
