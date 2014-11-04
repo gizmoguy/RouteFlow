@@ -215,6 +215,14 @@ void RFClient::sendInterfaceToControllerRouteMods(const Interface &iface) {
              rm = controllerRouteMod(port, vlan, hwaddress, false, *it);
              rm.add_match(Match(RFMT_ETHERTYPE, (uint16_t)ETHERTYPE_ARP));
              sendRm(rm);
+             /* DHCP */
+             rm = controllerRouteMod(port, vlan, hwaddress, false, *it);
+             rm.add_match(Match(RFMT_ETHERTYPE, (uint16_t)ETHERTYPE_IP));
+             rm.add_match(Match(RFMT_ETHERNET, MACAddress("FF:FF:FF:FF:FF:FF")));
+             rm.add_match(Match(RFMT_NW_PROTO, (uint16_t)IPPROTO_UDP));
+             rm.add_match(Match(RFMT_TP_SRC, (uint16_t)TPORT_DHCP_SRC));
+             rm.add_match(Match(RFMT_TP_DST, (uint16_t)TPORT_DHCP_DST));
+             sendRm(rm);
          } else {
              /* TODO: handle neighbor solicitation et al specifically, 
                       like we do for IPv4 and ARP. */

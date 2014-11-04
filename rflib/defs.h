@@ -59,6 +59,8 @@ typedef enum port_config_type {
 #define PRIORITY_HIGHEST 0xC030
 
 #define TPORT_BGP 0x00B3
+#define TPORT_DHCP_SRC 0x44
+#define TPORT_DHCP_DST 0x43
 #define OFPP_CONTROLLER 0xFFFFFFFD
 
 #define CONTROLLER_GROUP 1
