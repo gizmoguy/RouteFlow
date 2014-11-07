@@ -241,6 +241,16 @@ void RFClient::sendInterfaceToControllerRouteMods(const Interface &iface) {
          rm.add_match(Match(RFMT_NW_PROTO, (uint16_t)IPPROTO_TCP));
          rm.add_match(Match(RFMT_TP_DST, (uint16_t)TPORT_BGP));
          sendRm(rm);
+         /* OSPF for IPv4 */
+         rm = controllerRouteMod(port, vlan, false, hwaddress, false, *it);
+         rm.add_match(Match(RFMT_ETHERTYPE, (uint16_t)ETHERTYPE_IP));
+         rm.add_match(Match(RFMT_NW_PROTO, (uint16_t)IPPROTO_OSPF));
+         sendRm(rm);
+         /* OSPF for IPv6 */
+         rm = controllerRouteMod(port, vlan, false, hwaddress, false, *it);
+         rm.add_match(Match(RFMT_ETHERTYPE, (uint16_t)ETHERTYPE_IPV6));
+         rm.add_match(Match(RFMT_NW_PROTO, (uint16_t)IPPROTO_OSPF));
+         sendRm(rm);
          /* TODO: add other IGP traffic here - RIPv2 et al */
     }
 }
