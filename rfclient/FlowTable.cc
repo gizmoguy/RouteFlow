@@ -66,7 +66,7 @@ void FlowTable::operator()() {
             syslog(LOG_NOTICE, "Netlink interface enabled");
             rtnl_open(&rth, RTMGRP_IPV4_ROUTE | RTMGRP_IPV6_ROUTE |
                             RTMGRP_IPV4_MROUTE | RTMGRP_IPV6_MROUTE);
-            int rs = setsockopt(rthNeigh.fd, SOL_SOCKET, SO_RCVBUFFORCE, &nl_buffersize, sizeof(nl_buffersize));
+            int rs = setsockopt(rth.fd, SOL_SOCKET, SO_RCVBUFFORCE, &nl_buffersize, sizeof(nl_buffersize));
             if (rs != 0) {
                 syslog(LOG_CRIT, "cannot set socket size for routes: %d", errno);
                 exit(rs);
