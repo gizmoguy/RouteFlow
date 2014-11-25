@@ -159,9 +159,6 @@ class SatelliteRouteModTranslator(DefaultRouteModTranslator):
 
 
 class NoviFlowMultitableRouteModTranslator(RouteModTranslator):
-    # NoviFlow as of Aug 2014 doesn't handle flow add operations
-    # in unsorted priority order well (very slow). For the moment
-    # make all flows in a table same priority.
 
     FIB_TABLE = 2
     ETHER_TABLE = 1
@@ -262,18 +259,12 @@ class NoviFlowMultitableRouteModTranslator(RouteModTranslator):
         rm.add_action(Action.OUTPUT(entry.dp_port))
 
         rm.set_table(self.FIB_TABLE)
-        # See NoviFlow note
-        rm.set_options(None)
-        rm.add_option(Option.PRIORITY(PRIORITY_HIGH))
 
         rms.extend(self._send_rm_with_matches(rm, entry.dp_port, entries))
         return rms
 
     def handle_isl_route_mod(self, r, rm):
         rms = []
-        # See NoviFlow note
-        rm.set_options(None)
-        rm.add_option(Option.PRIORITY(PRIORITY_HIGH))
         rm.set_id(self.dp_id)
         rm.set_table(self.FIB_TABLE)
         rm.set_actions(None)
