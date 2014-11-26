@@ -497,8 +497,10 @@ class RFServer(RFProtocolFactory, IPC.IPCMessageProcessor):
             self.log.info("Datapaths that support multiple tables: %s",
                           list(self.multitabledps))
 
+        self.ack_q = Queue.Queue()
         self.dp_q = Queue.Queue()
         self.ipc_lock = threading.Lock()
+        self.routemod_outstanding = threading.Event()
         self.ipc = IPCService.for_server(RFSERVER_ID)
 
         self.worker = threading.Thread(target=self.dp_worker)
@@ -512,29 +514,39 @@ class RFServer(RFProtocolFactory, IPC.IPCMessageProcessor):
         self.ipc_lock.acquire()
         self.ipc.send(channel, channel_id, msg)
         self.ipc_lock.release()
-
+    
     def dp_worker(self):
         while True:
             (ct_id, rm) = self.dp_q.get(block=True)
             self.ipc_send(RFSERVER_RFPROXY_CHANNEL, ct_id, rm)
             self.dp_q.task_done()
 
+    def send_routemod_acks(self):
+        while not self.ack_q.empty():
+            (vm_id, ack) = self.ack_q.get()
+            self.ipc_send(RFCLIENT_RFSERVER_CHANNEL, vm_id, ack)
+            self.ack_q.task_done()
+
     def process(self, from_, to, channel, msg):
         type_ = msg.get_type()
-        if type_ == PORT_REGISTER:
-            self.register_vm_port(msg.get_vm_id(), msg.get_vm_port(),
-                                  msg.get_hwaddress())
-        elif type_ == ROUTE_MOD:
-            self.register_route_mod(msg)
-        elif type_ == DATAPATH_PORT_REGISTER:
-            self.register_dp_port(msg.get_ct_id(),
-                                  msg.get_dp_id(),
-                                  msg.get_dp_port())
-        elif type_ == DATAPATH_DOWN:
-            self.set_dp_down(msg.get_ct_id(), msg.get_dp_id())
-        elif type_ == VIRTUAL_PLANE_MAP:
-            self.map_port(msg.get_vm_id(), msg.get_vm_port(),
-                          msg.get_vs_id(), msg.get_vs_port())
+        if channel == RFCLIENT_RFSERVER_CHANNEL:
+            if type_ == ROUTE_MOD:
+                self.register_route_mod(msg)
+            elif type_ == PORT_REGISTER:
+                self.register_vm_port(msg.get_vm_id(), msg.get_vm_port(),
+                                      msg.get_hwaddress())
+        elif channel == RFSERVER_RFPROXY_CHANNEL:
+            if type_ == DATAPATH_PORT_REGISTER:
+                self.register_dp_port(msg.get_ct_id(),
+                                      msg.get_dp_id(),
+                                      msg.get_dp_port())
+            elif type_ == DATAPATH_DOWN:
+                self.set_dp_down(msg.get_ct_id(), msg.get_dp_id())
+            elif type_ == VIRTUAL_PLANE_MAP:
+                self.map_port(msg.get_vm_id(), msg.get_vm_port(),
+                              msg.get_vs_id(), msg.get_vs_port())
+            elif type_ == ROUTE_MOD:
+                self.send_routemod_acks()
 
     # Port register methods
     def register_vm_port(self, vm_id, vm_port, eth_addr):
@@ -572,10 +584,9 @@ class RFServer(RFProtocolFactory, IPC.IPCMessageProcessor):
                           % (format_id(vm_id), vm_port, eth_addr,
                              format_id(entry.dp_id), entry.dp_port))
 
-    def acknowledge_route_mod(self, ct_id, vm_id, vm_port):
-        self.ipc_send(RFCLIENT_RFSERVER_CHANNEL, str(vm_id),
-                      PortConfig(vm_id=vm_id, vm_port=vm_port, operation_id=PCT_ROUTEMOD_ACK))
-        return
+    def queue_routemod_ack(self, ct_id, vm_id, vm_port):
+        self.ack_q.put((str(vm_id), 
+                        PortConfig(vm_id=vm_id, vm_port=vm_port, operation_id=PCT_ROUTEMOD_ACK)))
 
     def send_route_mod(self, ct_id, rm):
         rm.add_option(Option.CT_ID(ct_id))
@@ -625,7 +636,8 @@ class RFServer(RFProtocolFactory, IPC.IPCMessageProcessor):
 
         for rm in rms:
             self.send_route_mod(entry.ct_id, rm)
-        self.acknowledge_route_mod(entry.ct_id, vm_id, vm_port)
+
+        self.queue_routemod_ack(entry.ct_id, vm_id, vm_port)
 
     # DatapathPortRegister methods
     def register_dp_port(self, ct_id, dp_id, dp_port):
