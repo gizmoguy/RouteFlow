@@ -389,12 +389,17 @@ class CorsaMultitableRouteModTranslator(RouteModTranslator):
                 if (entry.get_status() == RFENTRY_ACTIVE or
                     entry.get_status() == RFISL_ACTIVE):
                     dst_eth = None
-                    for action_dict in rm.actions:
+                    actions = rm.actions
+                    rm.set_actions(None)
+                    for action_dict in actions:
                         action = Action.from_dict(action_dict)
                         action_type = action.type_to_str(action._type)
                         if action_type == 'RFAT_SET_ETH_DST':
                             dst_eth = action.get_value()
-                            break
+                        elif action_type == 'RFAT_SWAP_VLAN_ID':
+                            vlan_id = action.get_value()
+                            action = Action.SET_VLAN_ID(vlan_id)
+                        rm.add_action(action)
                     if dst_eth not in self.actions_to_groupid:
                         self.last_groupid += 1
                         new_groupid = self.last_groupid
