@@ -11,7 +11,7 @@
 #include "FlowTable.hh"
 #include "PortMapper.hh"
 
-const int max_rm_outstanding = 10;
+const int max_rm_outstanding = 1;
 
 class RFClient : private RFProtocolFactory, private IPCMessageProcessor,
                  public InterfaceMap {
