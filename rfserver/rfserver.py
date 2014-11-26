@@ -9,6 +9,7 @@ import argparse
 import time
 import copy
 import Queue
+import threading
 
 from bson.binary import Binary
 
@@ -467,6 +468,7 @@ class CorsaMultitableRouteModTranslator(RouteModTranslator):
         return rms
 
 class RFServer(RFProtocolFactory, IPC.IPCMessageProcessor):
+
     def __init__(self, configfile, islconffile, multitabledps, satellitedps):
         self.config = RFConfig(configfile)
         self.islconf = RFISLConf(islconffile)
@@ -495,9 +497,27 @@ class RFServer(RFProtocolFactory, IPC.IPCMessageProcessor):
             self.log.info("Datapaths that support multiple tables: %s",
                           list(self.multitabledps))
 
+        self.dp_q = Queue.Queue()
+        self.ipc_lock = threading.Lock()
         self.ipc = IPCService.for_server(RFSERVER_ID)
+
+        self.worker = threading.Thread(target=self.dp_worker)
+        self.worker.daemon = True
+        self.worker.start()
+
         self.ipc.listen(RFCLIENT_RFSERVER_CHANNEL, self, self, False)
         self.ipc.listen(RFSERVER_RFPROXY_CHANNEL, self, self, True)
+
+    def ipc_send(self, channel, channel_id, msg):
+        self.ipc_lock.acquire()
+        self.ipc.send(channel, channel_id, msg)
+        self.ipc_lock.release()
+
+    def dp_worker(self):
+        while True:
+            (ct_id, rm) = self.dp_q.get(block=True)
+            self.ipc_send(RFSERVER_RFPROXY_CHANNEL, ct_id, rm)
+            self.dp_q.task_done()
 
     def process(self, from_, to, channel, msg):
         type_ = msg.get_type()
@@ -553,13 +573,13 @@ class RFServer(RFProtocolFactory, IPC.IPCMessageProcessor):
                              format_id(entry.dp_id), entry.dp_port))
 
     def acknowledge_route_mod(self, ct_id, vm_id, vm_port):
-        self.ipc.send(RFCLIENT_RFSERVER_CHANNEL, str(vm_id),
+        self.ipc_send(RFCLIENT_RFSERVER_CHANNEL, str(vm_id),
                       PortConfig(vm_id=vm_id, vm_port=vm_port, operation_id=PCT_ROUTEMOD_ACK))
         return
 
     def send_route_mod(self, ct_id, rm):
         rm.add_option(Option.CT_ID(ct_id))
-        self.ipc.send(RFSERVER_RFPROXY_CHANNEL, str(ct_id), rm)
+        self.dp_q.put((str(ct_id), rm))
 
     # Handle RouteMod messages (type ROUTE_MOD)
     #
@@ -756,7 +776,7 @@ class RFServer(RFProtocolFactory, IPC.IPCMessageProcessor):
     def reset_vm_port(self, vm_id, vm_port):
         if vm_id is None:
             return
-        self.ipc.send(RFCLIENT_RFSERVER_CHANNEL, str(vm_id),
+        self.ipc_send(RFCLIENT_RFSERVER_CHANNEL, str(vm_id),
                       PortConfig(vm_id=vm_id, vm_port=vm_port,
                                  operation_id=PCT_RESET))
         self.log.info("Resetting client port (vm_id=%s, vm_port=%i)" %
@@ -772,10 +792,10 @@ class RFServer(RFProtocolFactory, IPC.IPCMessageProcessor):
             msg = DataPlaneMap(ct_id=entry.ct_id,
                                dp_id=entry.dp_id, dp_port=entry.dp_port,
                                vs_id=vs_id, vs_port=vs_port)
-            self.ipc.send(RFSERVER_RFPROXY_CHANNEL, str(entry.ct_id), msg)
+            self.ipc_send(RFSERVER_RFPROXY_CHANNEL, str(entry.ct_id), msg)
             msg = PortConfig(vm_id=vm_id, vm_port=vm_port,
                              operation_id=PCT_MAP_SUCCESS)
-            self.ipc.send(RFCLIENT_RFSERVER_CHANNEL, str(entry.vm_id), msg)
+            self.ipc_send(RFCLIENT_RFSERVER_CHANNEL, str(entry.vm_id), msg)
             self.log.info("Mapping client-datapath association "
                           "(vm_id=%s, vm_port=%i, dp_id=%s, "
                           "dp_port=%i, vs_id=%s, vs_port=%i)" %
