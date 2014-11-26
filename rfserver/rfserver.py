@@ -261,6 +261,9 @@ class NoviFlowMultitableRouteModTranslator(RouteModTranslator):
 
         rm.set_table(self.FIB_TABLE)
 
+        rm.set_options(None)
+        rm.add_option(self.CONTROLLER_PRIORITY)
+
         rms.extend(self._send_rm_with_matches(rm, entry.dp_port, entries))
         return rms
 
@@ -268,6 +271,8 @@ class NoviFlowMultitableRouteModTranslator(RouteModTranslator):
         rms = []
         rm.set_id(self.dp_id)
         rm.set_table(self.FIB_TABLE)
+        rm.set_options(None)
+        rm.add_option(self.CONTROLLER_PRIORITY)
         rm.set_actions(None)
         rm.add_action(Action.SET_ETH_SRC(r.eth_addr))
         rm.add_action(Action.SET_ETH_DST(r.rem_eth_addr))
